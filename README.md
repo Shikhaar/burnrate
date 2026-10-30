@@ -6,7 +6,7 @@
 
 Burnrate tracks LLM token usage and spend across OpenAI, Anthropic, Google and others. It attributes every dollar to the project, feature, team and customer that spent it, forecasts month-end spend, catches cost spikes, and reconciles its estimates against what providers actually bill.
 
-[Quickstart](#quickstart) · [Features](#features) · [Architecture](docs/architecture.md) · [Event schema](docs/event-schema.md) · [API](docs/api-contract.md)
+[Quickstart](#quickstart) · [Features](#features) · [Demo script](docs/demo-script.md) · [Architecture](docs/architecture.md) · [Event schema](docs/event-schema.md) · [API](docs/api-contract.md)
 
 </div>
 
