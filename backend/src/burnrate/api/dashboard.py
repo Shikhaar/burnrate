@@ -8,7 +8,7 @@ from burnrate.db import get_session
 from burnrate.models import Budget, PriceEntry
 from burnrate.schemas import BudgetIn, Dimension
 from burnrate.security import require_dashboard_token
-from burnrate.services import analytics, anomalies, budgets, forecast, insights, reconciliation
+from burnrate.services import alerts, analytics, anomalies, budgets, forecast, insights, reconciliation
 
 router = APIRouter(prefix="/api", tags=["dashboard"], dependencies=[Depends(require_dashboard_token)])
 
@@ -97,6 +97,17 @@ def delete_budget(budget_id: int, session: SessionDep) -> Response:
     session.delete(budget)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/alerts")
+def get_alerts(session: SessionDep, days: Days = 30) -> dict:
+    return {"items": alerts.recent(session, days)}
+
+
+@router.post("/alerts/evaluate")
+def evaluate_alerts(session: SessionDep) -> dict:
+    fired = alerts.evaluate(session)
+    return {"fired": len(fired)}
 
 
 @router.get("/pricing")

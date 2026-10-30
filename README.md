@@ -38,6 +38,7 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Forecasting** | Month-end projection from a 28-day trend × weekday seasonality, with a 90% confidence band. |
 | **Anomaly detection** | Robust z-score (median/MAD) per project, feature and model, with severity and plain-English explanations. |
 | **Budgets** | Monthly limits company-wide or per project, team, feature or customer, with projected-overrun warnings. |
+| **Alerts** | Budget and anomaly alerts sent to Slack or any webhook. Deduplicated, so each condition notifies once (`burnrate alerts` from cron). |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
 | **Two ingestion paths** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution) **or** OTLP/HTTP using OpenTelemetry GenAI semantic conventions. |
 | **Production basics** | Hashed API keys, idempotent ingestion, optional dashboard token, health checks, Docker, CI on SQLite + Postgres. |
@@ -135,7 +136,7 @@ docs/        architecture, event schema, API contract
 
 - LangChain / LlamaIndex / Vercel AI SDK callbacks
 - Coding-agent spend (Claude Code, Cursor) via admin and analytics APIs
-- Slack/email alerts for budgets and anomalies
+- Email alerts and per-team routing
 - Multi-tenant orgs with SSO and role-based access control
 - ClickHouse rollups for very high event volumes
 

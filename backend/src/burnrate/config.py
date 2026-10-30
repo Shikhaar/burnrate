@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     # Optional bearer token protecting the read-only dashboard API. Empty = open (local/demo use).
     dashboard_token: str = ""
     max_batch_size: int = 1000
+    # Slack-compatible incoming webhook for budget/anomaly alerts (POST {"text": ...}).
+    alert_webhook_url: str = ""
 
     # Provider admin keys used by the billing connectors (never the app's inference keys).
     openai_admin_key: str = ""

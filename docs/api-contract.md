@@ -17,6 +17,8 @@ Common query params: `days` (window length, default 30). Dimension values: `prov
 | POST | `/api/budgets` | body `{name, scope_dimension|null, scope_value|null, monthly_limit_usd, alert_threshold}` → budget object |
 | DELETE | `/api/budgets/{id}` | 204 |
 | GET | `/api/insights` | `{items:[{id,kind,title,detail,estimated_monthly_savings_usd,scope}]}` |
+| GET | `/api/alerts?days=30` | `{items:[{id,kind:"budget"|"anomaly",severity,title,detail,created_at,delivered,delivery_error}]}` |
+| POST | `/api/alerts/evaluate` | `{fired}` — evaluate now (normally run from cron via `burnrate alerts`) |
 | GET | `/api/pricing` | `{items:[{provider,model,input_per_mtok,output_per_mtok,cached_input_per_mtok,cache_write_per_mtok,effective_from}]}` |
 
 Ingestion (used by SDKs, not the dashboard): `POST /v1/events` with header `X-API-Key`, body `{events:[...]}` → `{accepted, rejected, errors[]}`.

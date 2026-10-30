@@ -117,3 +117,24 @@ def test_dashboard_token_enforced_when_configured(client, monkeypatch):
     monkeypatch.setattr(get_settings(), "dashboard_token", "s3cret")
     assert client.get("/api/meta").status_code == 401
     assert client.get("/api/meta", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+def test_alerts_fire_once_and_deliver_to_webhook(seeded, session, monkeypatch):
+    import httpx
+
+    from burnrate.config import get_settings
+    from burnrate.services.alerts import evaluate
+
+    posted = []
+    monkeypatch.setattr(get_settings(), "alert_webhook_url", "https://hooks.example/x")
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: posted.append(r) or httpx.Response(200)))
+
+    seeded.post("/api/budgets", json={"name": "Tight", "monthly_limit_usd": 1.0})
+    fired = evaluate(session, client)
+    assert any(a.kind == "budget" and a.title == "Budget exceeded: Tight" for a in fired)
+    assert any(a.kind == "anomaly" and "ticket-triage" in a.title for a in fired)
+    assert len(posted) == len(fired) and all(a.delivered_at for a in fired)
+
+    again = evaluate(session, httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200))))
+    assert again == []
+    assert len(seeded.get("/api/alerts").json()["items"]) == len(fired)

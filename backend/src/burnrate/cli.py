@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("provider", choices=["openai", "anthropic", "all"])
     c.add_argument("--days", type=int, default=31)
 
+    sub.add_parser("alerts", help="Evaluate budgets/anomalies and send new alerts to the webhook")
+
     args = parser.parse_args(argv)
     init_db()
     with SessionLocal() as session:
@@ -51,6 +53,13 @@ def main(argv: list[str] | None = None) -> int:
             added = sync_registry(session, args.file) if args.file else 0
             n = reprice(session, since=args.since)
             print(f"Added {added} price entries; repriced {n:,} events.")
+        elif args.cmd == "alerts":
+            from burnrate.services.alerts import evaluate
+
+            fired = evaluate(session)
+            for a in fired:
+                print(f"[{a.severity}] {a.title} — {a.detail}")
+            print(f"{len(fired)} new alert(s).")
         elif args.cmd == "sync":
             from burnrate.connectors import sync_billing
 

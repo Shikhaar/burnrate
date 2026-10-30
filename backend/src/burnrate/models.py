@@ -149,3 +149,19 @@ class Budget(Base):
     monthly_limit_usd: Mapped[float] = mapped_column(Float)
     alert_threshold: Mapped[float] = mapped_column(Float, default=0.8)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Alert(Base):
+    """A fired alert. `dedupe_key` makes evaluation idempotent: each condition notifies once."""
+
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dedupe_key: Mapped[str] = mapped_column(String(200), unique=True)
+    kind: Mapped[str] = mapped_column(String(30))  # budget | anomaly
+    severity: Mapped[str] = mapped_column(String(10))
+    title: Mapped[str] = mapped_column(String(300))
+    detail: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivery_error: Mapped[str | None] = mapped_column(String(500))
