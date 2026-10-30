@@ -5,6 +5,8 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install .
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 RUN useradd --create-home --uid 10001 burnrate
 USER burnrate
@@ -12,4 +14,4 @@ USER burnrate
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"
-CMD ["uvicorn", "burnrate.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn burnrate.main:app --host 0.0.0.0 --port 8000 --proxy-headers"]

@@ -30,8 +30,8 @@ services:
     environment:
       BURNRATE_DATABASE_URL: postgresql+psycopg://burnrate:burnrate@db:5432/burnrate
     depends_on:
-      db:
-        condition: service_healthy
+      api:
+        condition: service_healthy  # api runs migrations first
     profiles: ["seed"]
 
   web:

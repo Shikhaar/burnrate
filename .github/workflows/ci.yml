@@ -38,6 +38,7 @@ jobs:
         env:
           BURNRATE_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://burnrate:burnrate@localhost:5432/burnrate' || 'sqlite:///./ci.db' }}
         run: |
+          alembic upgrade head
           burnrate seed --days 45
           python - <<'EOF'
           from fastapi.testclient import TestClient
