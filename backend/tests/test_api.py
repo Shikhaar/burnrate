@@ -184,3 +184,30 @@ def test_claude_code_cumulative_metrics_rejected_with_guidance(client, api_key):
     r = client.post("/v1/otlp/v1/metrics", json=_claude_code_payload(ts, temporality=2),
                     headers={"X-API-Key": api_key}).json()
     assert r["accepted"] == 0 and "TEMPORALITY_PREFERENCE=delta" in r["errors"][0]["error"]
+
+
+def test_forecast_ignores_partial_today(client, session):
+    """A steady $10/day history with only $1 spent so far today must not drag the trend down."""
+    from datetime import date as date_cls
+
+    from burnrate.models import EventCost, UsageEvent
+    from burnrate.services.forecast import forecast_month
+
+    on = date_cls(2026, 6, 15)
+    for i in range(1, 30):
+        d = on - timedelta(days=i)
+        ev = UsageEvent(timestamp=datetime(d.year, d.month, d.day, 12, tzinfo=UTC), day=d, provider="openai",
+                        model="gpt-4o")
+        session.add(ev)
+        session.flush()
+        session.add(EventCost(event_id=ev.id, day=d, total_cost_usd=10.0))
+    ev = UsageEvent(timestamp=datetime(2026, 6, 15, 1, tzinfo=UTC), day=on, provider="openai", model="gpt-4o")
+    session.add(ev)
+    session.flush()
+    session.add(EventCost(event_id=ev.id, day=on, total_cost_usd=1.0))
+    session.commit()
+
+    fc = forecast_month(session, on=on)
+    # 14 full days ($140) + today's expected $10 + 15 more days ($150) = $300
+    assert fc["projected_usd"] == pytest.approx(300, rel=0.01)
+    assert fc["low_usd"] <= fc["projected_usd"] <= fc["high_usd"]

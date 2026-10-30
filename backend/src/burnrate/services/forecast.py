@@ -32,7 +32,8 @@ def forecast_month(session: Session, on: date | None = None) -> dict:
     month_start = on.replace(day=1)
     month_end = month_start + timedelta(days=days_in_month(on) - 1)
 
-    history_w = Window(on - timedelta(days=LOOKBACK_DAYS - 1), on)
+    # Train on complete days only: today is partial and would bias the trend downward.
+    history_w = Window(on - timedelta(days=LOOKBACK_DAYS), on - timedelta(days=1))
     history = daily_totals(session, history_w)
     month = daily_totals(session, Window(month_start, on))
     mtd = sum(v[0] for v in month.values())
@@ -55,7 +56,18 @@ def forecast_month(session: Session, on: date | None = None) -> dict:
         ]
         sigma = statistics.pstdev([y - f for y, f in zip(ys, fitted, strict=True)])
 
-    daily, future_sum, remaining = [], 0.0, 0
+    def predict(day: date) -> float:
+        if not has_history:
+            return mtd / on.day
+        x = LOOKBACK_DAYS - 1 + (day - history_w.end).days
+        return max(0.0, (intercept + slope * x) * seasonal.get(day.weekday(), 1.0))
+
+    # Whatever today's model expects beyond what has already been spent is still to come.
+    today_actual = month.get(on, (0.0, 0, 0))[0]
+    future_sum = max(0.0, predict(on) - today_actual)
+    remaining: float = future_sum / predict(on) if predict(on) else 0.0
+
+    daily = []
     d = month_start
     while d <= month_end:
         if d <= on:
@@ -63,11 +75,7 @@ def forecast_month(session: Session, on: date | None = None) -> dict:
                           "forecast_usd": None})
         else:
             remaining += 1
-            if has_history:
-                x = LOOKBACK_DAYS - 1 + (d - on).days
-                pred = max(0.0, (intercept + slope * x) * seasonal.get(d.weekday(), 1.0))
-            else:
-                pred = mtd / on.day
+            pred = predict(d)
             future_sum += pred
             daily.append({"date": d.isoformat(), "actual_usd": None, "forecast_usd": round(pred, 4)})
         d += timedelta(days=1)
