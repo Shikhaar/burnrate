@@ -6,7 +6,7 @@ import calendar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, literal_column, select
 from sqlalchemy.orm import Session
 
 from burnrate.models import EventCost, UsageEvent
@@ -32,6 +32,8 @@ TOKENS = func.coalesce(
     0,
 )
 REQUESTS = func.count(UsageEvent.id)
+# Rendered inline (not a bound param) so Postgres sees identical SELECT and GROUP BY expressions.
+UNATTRIBUTED = literal_column("'(unattributed)'")
 
 
 def today() -> date:
@@ -143,7 +145,7 @@ def overview(session: Session, days: int) -> dict:
 
 def _grouped(session: Session, dim: str, w: Window) -> dict[str, tuple[float, int, int]]:
     col = DIMENSIONS[dim]
-    key = func.coalesce(col, "(unattributed)")
+    key = func.coalesce(col, UNATTRIBUTED)
     stmt = _in(_base(key, COST, TOKENS, REQUESTS), w).group_by(key)
     return {k: (float(c), int(t), int(r)) for k, c, t, r in session.execute(stmt)}
 
@@ -178,7 +180,7 @@ def breakdown(session: Session, dimension: str, days: int, limit: int = 10) -> d
 
 def timeseries(session: Session, group_by: str, days: int, top: int = 6) -> dict:
     w = Window.last(days)
-    col = func.coalesce(DIMENSIONS[group_by], "(unattributed)")
+    col = func.coalesce(DIMENSIONS[group_by], UNATTRIBUTED)
     rows = session.execute(_in(_base(UsageEvent.day, col, COST), w).group_by(UsageEvent.day, col)).all()
 
     totals: dict[str, float] = {}

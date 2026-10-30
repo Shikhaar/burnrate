@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from burnrate.models import UsageEvent
-from burnrate.services.analytics import COST, DIMENSIONS, Window, _as_date, _base, _in
+from burnrate.services.analytics import COST, DIMENSIONS, UNATTRIBUTED, Window, _as_date, _base, _in
 
 BASELINE_DAYS = 14
 MIN_Z = 3.5
@@ -37,7 +37,7 @@ def detect(session: Session, days: int = 30, dimensions: tuple[str, ...] = WATCH
     found: list[dict] = []
 
     for dim in dimensions:
-        col = func.coalesce(DIMENSIONS[dim], "(unattributed)")
+        col = func.coalesce(DIMENSIONS[dim], UNATTRIBUTED)
         rows = session.execute(_in(_base(UsageEvent.day, col, COST), full).group_by(UsageEvent.day, col))
         series: dict[str, dict[date, float]] = {}
         for d, k, c in rows:
