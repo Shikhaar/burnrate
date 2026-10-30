@@ -18,10 +18,11 @@ from burnrate.services.analytics import Window, daily_totals, days_in_month, tod
 LOOKBACK_DAYS = 28
 
 
-def _linear_fit(ys: list[float]) -> tuple[float, float]:
+def _linear_fit(xs: list[float], ys: list[float]) -> tuple[float, float]:
     n = len(ys)
-    xs = range(n)
-    mx, my = (n - 1) / 2, sum(ys) / n
+    if n < 2:
+        return 0.0, (ys[0] if ys else 0.0)
+    mx, my = sum(xs) / n, sum(ys) / n
     sxx = sum((x - mx) ** 2 for x in xs)
     slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=True)) / sxx if sxx else 0.0
     return slope, my - slope * mx
@@ -49,8 +50,11 @@ def forecast_month(session: Session, on: date | None = None) -> dict:
         for d, y in zip(history_w.dates(), ys, strict=True):
             by_dow.setdefault(d.weekday(), []).append(y)
         seasonal = {k: (statistics.fmean(v) / overall if overall else 1.0) for k, v in by_dow.items()}
-        deseason = [y / (seasonal[d.weekday()] or 1.0) for d, y in zip(history_w.dates(), ys, strict=True)]
-        slope, intercept = _linear_fit(deseason)
+        # Fit the trend only on weekdays that normally see spend; a weekday whose factor is 0 carries
+        # no information about the level and would otherwise drag it down.
+        points = [(i, y / seasonal[d.weekday()]) for i, (d, y) in enumerate(zip(history_w.dates(), ys, strict=True))
+                  if seasonal[d.weekday()] > 0]
+        slope, intercept = _linear_fit([x for x, _ in points], [y for _, y in points])
         fitted = [
             (intercept + slope * i) * seasonal[d.weekday()] for i, d in enumerate(history_w.dates())
         ]

@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./burnrate.db"
     cors_origins: list[str] = ["http://localhost:3000"]
-    # Optional bearer token protecting the read-only dashboard API. Empty = open (local/demo use).
+    # Bearer token protecting the dashboard API (/api/*, including budget/alert writes). Empty = open; local demo only.
     dashboard_token: str = ""
     max_batch_size: int = 1000
     # Slack-compatible incoming webhook for budget/anomaly alerts (POST {"text": ...}).

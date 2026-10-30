@@ -3,6 +3,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# Token columns are 32-bit on Postgres; no single call comes close to this.
+MAX_TOKENS = 2**31 - 1
+
 Dimension = Literal["provider", "model", "project", "feature", "team", "environment", "customer", "user"]
 
 
@@ -23,11 +26,11 @@ class EventIn(BaseModel):
     user_id: str | None = Field(None, max_length=100)
     trace_id: str | None = Field(None, max_length=64)
 
-    input_tokens: int = Field(0, ge=0)
-    cached_input_tokens: int = Field(0, ge=0)
-    cache_write_tokens: int = Field(0, ge=0)
-    output_tokens: int = Field(0, ge=0)
-    reasoning_tokens: int = Field(0, ge=0)
+    input_tokens: int = Field(0, ge=0, le=MAX_TOKENS)
+    cached_input_tokens: int = Field(0, ge=0, le=MAX_TOKENS)
+    cache_write_tokens: int = Field(0, ge=0, le=MAX_TOKENS)
+    output_tokens: int = Field(0, ge=0, le=MAX_TOKENS)
+    reasoning_tokens: int = Field(0, ge=0, le=MAX_TOKENS)
 
     latency_ms: int | None = Field(None, ge=0)
     status: Literal["success", "error", "timeout", "cancelled"] = "success"
@@ -39,12 +42,18 @@ class EventIn(BaseModel):
     def _lower(cls, v: str) -> str:
         return v.strip().lower()
 
+    @field_validator("request_id")
+    @classmethod
+    def _blank_id(cls, v: str | None) -> str | None:
+        return v.strip() or None if v is not None else None
+
     @field_validator("timestamp")
     @classmethod
-    def _tz(cls, v: datetime | None) -> datetime | None:
-        if v is not None and v.tzinfo is None:
-            return v.replace(tzinfo=UTC)
-        return v
+    def _utc(cls, v: datetime | None) -> datetime | None:
+        if v is None:
+            return None
+        # Naive means UTC; aware is converted so SQLite (which drops offsets) stores true UTC.
+        return v.replace(tzinfo=UTC) if v.tzinfo is None else v.astimezone(UTC)
 
 
 class EventBatchIn(BaseModel):

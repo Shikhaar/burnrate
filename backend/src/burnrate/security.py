@@ -42,5 +42,5 @@ def require_dashboard_token(authorization: str | None = Header(default=None)) ->
     if not expected:
         return
     supplied = (authorization or "").removeprefix("Bearer ").strip()
-    if not hmac.compare_digest(supplied, expected):
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid dashboard token")

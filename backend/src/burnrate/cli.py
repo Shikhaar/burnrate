@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from burnrate.db import SessionLocal, init_db
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "sync":
             from burnrate.connectors import sync_billing
 
-            start = date.today() - timedelta(days=args.days)
+            start = datetime.now(UTC).date() - timedelta(days=args.days)
             providers = ["openai", "anthropic"] if args.provider == "all" else [args.provider]
             for name in providers:
                 rows = sync_billing(session, name, start)

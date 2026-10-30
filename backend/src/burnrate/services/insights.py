@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from burnrate.models import EventCost, UsageEvent
-from burnrate.pricing import MTOK, PriceBook
+from burnrate.pricing import MTOK, PriceBook, snapshot_of
 from burnrate.services.analytics import Window, _base, _in
 
 WINDOW_DAYS = 30
@@ -69,7 +69,7 @@ def generate(session: Session) -> list[dict]:
         avg_out = outp / n
 
         # 1) Premium model on light requests -> cheaper tier.
-        base_model = next((m for (p, m) in DOWNGRADES if p == provider and model.startswith(m)), None)
+        base_model = next((m for (p, m) in DOWNGRADES if p == provider and snapshot_of(model, m)), None)
         if base_model and avg_in <= LIGHT_INPUT_TOKENS and avg_out <= LIGHT_OUTPUT_TOKENS:
             target = DOWNGRADES[(provider, base_model)]
             tp = book.resolve(provider, target, w.end)

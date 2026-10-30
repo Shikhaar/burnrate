@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -14,6 +15,14 @@ from burnrate.models import EventCost, PriceEntry, UsageEvent
 
 DEFAULT_REGISTRY = Path(__file__).parent / "data" / "pricing.yaml"
 MTOK = 1_000_000
+# What may follow a registered model id and still be "the same model": dated snapshots and aliases
+# (gpt-4o-2024-08-06, claude-sonnet-4-5-20250929, gemini-1.5-pro-002, *-latest). Anything else, e.g.
+# o3-mini vs o3 or gpt-5-pro vs gpt-5, is a different model with different prices.
+SNAPSHOT_SUFFIX = re.compile(r"^-(\d{4}-\d{2}-\d{2}|\d{8}|\d{3}|latest)$")
+
+
+def snapshot_of(model: str, base: str) -> bool:
+    return model == base or (model.startswith(base) and bool(SNAPSHOT_SUFFIX.match(model[len(base):])))
 
 
 @dataclass(frozen=True)
@@ -50,8 +59,8 @@ def load_registry_file(path: Path = DEFAULT_REGISTRY) -> list[dict]:
         for model, p in models.items():
             rows.append(
                 {
-                    "provider": provider,
-                    "model": model,
+                    "provider": str(provider).lower(),
+                    "model": str(model).lower(),
                     "input_per_mtok": float(p["input"]),
                     "output_per_mtok": float(p.get("output", 0)),
                     "cached_input_per_mtok": p.get("cached_input"),
@@ -102,12 +111,13 @@ class PriceBook:
         provider, model = provider.lower(), model.lower()
         versions = self._by_key.get((provider, model))
         if versions is None:
-            # Longest-prefix match handles dated snapshots like "gpt-4o-2024-08-06".
-            candidates = [m for (p, m) in self._by_key if p == provider and model.startswith(m)]
+            # Dated snapshots like "gpt-4o-2024-08-06" resolve to their base model.
+            candidates = [m for (p, m) in self._by_key if p == provider and snapshot_of(model, m)]
             if not candidates:
                 return None
             versions = self._by_key[(provider, max(candidates, key=len))]
         applicable = [v for v in versions if v.effective_from <= on]
+        # Before the first known price we still price at the earliest entry rather than report $0.
         return applicable[-1] if applicable else versions[0]
 
 

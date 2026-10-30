@@ -6,7 +6,7 @@ import calendar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import Select, func, literal_column, select
+from sqlalchemy import BigInteger, Select, cast, func, literal_column, select
 from sqlalchemy.orm import Session
 
 from burnrate.models import EventCost, UsageEvent
@@ -23,12 +23,13 @@ DIMENSIONS = {
 }
 
 COST = func.coalesce(func.sum(EventCost.total_cost_usd), 0.0)
+# Cast before adding: four int4 columns can overflow int4 on Postgres.
 TOKENS = func.coalesce(
     func.sum(
-        UsageEvent.input_tokens
-        + UsageEvent.cached_input_tokens
-        + UsageEvent.cache_write_tokens
-        + UsageEvent.output_tokens
+        cast(UsageEvent.input_tokens, BigInteger)
+        + cast(UsageEvent.cached_input_tokens, BigInteger)
+        + cast(UsageEvent.cache_write_tokens, BigInteger)
+        + cast(UsageEvent.output_tokens, BigInteger)
     ),
     0,
 )
@@ -212,7 +213,9 @@ def list_events(session: Session, limit: int, offset: int, filters: dict[str, st
     )
     count_stmt = _apply_filters(select(func.count(UsageEvent.id)), filters)
     total = session.scalar(count_stmt) or 0
-    rows = session.execute(stmt.order_by(UsageEvent.timestamp.desc()).limit(limit).offset(offset)).all()
+    rows = session.execute(
+        stmt.order_by(UsageEvent.timestamp.desc(), UsageEvent.id.desc()).limit(limit).offset(offset)
+    ).all()
     return {
         "total": total,
         "items": [

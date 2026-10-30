@@ -9,7 +9,7 @@ it is derived into `event_costs` using the versioned price registry, so a pricin
 | `request_id` | string? | Idempotency key. Re-sent events with the same id are counted as `duplicates`, not double-billed. The SDK uses the provider's response id when available. |
 | `timestamp` | ISO-8601 | Defaults to receive time. Naive timestamps are treated as UTC. |
 | `provider` | string | `openai`, `anthropic`, `google`, `mistral`, `bedrock`, ... (lower-cased) |
-| `model` | string | Dated snapshots resolve to the base price by longest prefix (`gpt-4o-2024-08-06` → `gpt-4o`). |
+| `model` | string | Dated snapshots resolve to their base model (`gpt-4o-2024-08-06` → `gpt-4o`). Other suffixes are different models (`o3-mini` ≠ `o3`); unknown models are recorded as `unpriced`, or use `provider_reported_cost_usd` if sent. |
 | `operation` | string | `chat`, `embeddings`, ... |
 | `project`, `feature`, `team`, `environment`, `customer_id`, `user_id`, `trace_id` | string? | Attribution dimensions. |
 | `input_tokens` | int | **Uncached** prompt tokens. |
@@ -40,4 +40,4 @@ cost = input_tokens        × input_rate
      + output_tokens       × output_rate            (rates are USD / 1M tokens)
 ```
 
-The price used is the latest registry entry for that model whose `effective_from` ≤ the event's day.
+The price used is the latest registry entry for that model whose `effective_from` ≤ the event's day (events older than the first entry use the earliest one).

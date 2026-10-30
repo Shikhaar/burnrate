@@ -11,6 +11,7 @@ Recognized span attributes:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
@@ -29,7 +30,15 @@ def _attr_value(v: dict):
 
 
 def _attrs(items: list[dict]) -> dict:
-    return {a["key"]: _attr_value(a.get("value", {})) for a in items or []}
+    return {a["key"]: _attr_value(a.get("value") or {}) for a in items or [] if isinstance(a, dict) and "key" in a}
+
+
+def _int(v) -> int:
+    return int(float(v)) if v not in (None, "") else 0
+
+
+# Per-span/datapoint problems we report and skip, instead of failing the whole export.
+BAD_INPUT = (ValidationError, ValueError, TypeError, KeyError, OverflowError)
 
 
 def spans_to_events(payload: dict) -> tuple[list[EventIn], list[IngestError]]:
@@ -41,43 +50,59 @@ def spans_to_events(payload: dict) -> tuple[list[EventIn], list[IngestError]]:
         for ss in rs.get("scopeSpans", []):
             for span in ss.get("spans", []):
                 idx += 1
-                a = {**resource, **_attrs(span.get("attributes", []))}
-                provider = a.get("gen_ai.provider.name") or a.get("gen_ai.system")
-                if not provider:
-                    continue  # not a GenAI span
-                provider = PROVIDER_ALIASES.get(str(provider).lower(), str(provider).lower())
-                input_total = int(a.get("gen_ai.usage.input_tokens") or 0)
-                cache_read = int(a.get("gen_ai.usage.cache_read_input_tokens") or 0)
-                cache_write = int(a.get("gen_ai.usage.cache_creation_input_tokens") or 0)
-                start_ns = int(span.get("startTimeUnixNano") or 0)
-                end_ns = int(span.get("endTimeUnixNano") or 0)
-                status_code = (span.get("status") or {}).get("code")
                 try:
-                    events.append(EventIn(
-                        request_id=a.get("gen_ai.response.id") or f"otel:{span.get('traceId')}:{span.get('spanId')}",
-                        timestamp=datetime.fromtimestamp(start_ns / 1e9, UTC) if start_ns else None,
-                        provider=provider,
-                        model=a.get("gen_ai.response.model") or a.get("gen_ai.request.model") or "unknown",
-                        operation=a.get("gen_ai.operation.name") or "chat",
-                        project=a.get("burnrate.project") or a.get("service.name") or "default",
-                        feature=a.get("burnrate.feature"),
-                        team=a.get("burnrate.team"),
-                        environment=a.get("deployment.environment.name") or a.get("deployment.environment")
-                        or "production",
-                        customer_id=a.get("burnrate.customer_id"),
-                        user_id=a.get("user.id") or a.get("enduser.id"),
-                        trace_id=span.get("traceId"),
-                        # OTel input_tokens is the full prompt; split out cache reads/writes.
-                        input_tokens=max(0, input_total - cache_read - cache_write),
-                        cached_input_tokens=cache_read,
-                        cache_write_tokens=cache_write,
-                        output_tokens=int(a.get("gen_ai.usage.output_tokens") or 0),
-                        latency_ms=(end_ns - start_ns) // 1_000_000 if start_ns and end_ns else None,
-                        status="error" if status_code in (2, "STATUS_CODE_ERROR") else "success",
-                    ))
-                except ValidationError as e:
-                    errors.append(IngestError(index=idx, error=str(e.errors()[0]["msg"])))
+                    event = _span_to_event(span, resource)
+                except BAD_INPUT as e:
+                    errors.append(IngestError(index=idx, error=_describe(e)))
+                    continue
+                if event is not None:
+                    events.append(event)
     return events, errors
+
+
+def _describe(e: Exception) -> str:
+    if isinstance(e, ValidationError):
+        return str(e.errors()[0]["msg"])
+    return f"{type(e).__name__}: {e}"
+
+
+def _span_to_event(span: dict, resource: dict) -> EventIn | None:
+    a = {**resource, **_attrs(span.get("attributes", []))}
+    provider = a.get("gen_ai.provider.name") or a.get("gen_ai.system")
+    if not provider:
+        return None  # not a GenAI span
+    provider = PROVIDER_ALIASES.get(str(provider).lower(), str(provider).lower())
+    # Current names first, then the older prompt/completion names some instrumentations still emit.
+    input_total = _int(a.get("gen_ai.usage.input_tokens") or a.get("gen_ai.usage.prompt_tokens"))
+    output = _int(a.get("gen_ai.usage.output_tokens") or a.get("gen_ai.usage.completion_tokens"))
+    cache_read = _int(a.get("gen_ai.usage.cache_read_input_tokens") or a.get("gen_ai.usage.cache_read.input_tokens"))
+    cache_write = _int(a.get("gen_ai.usage.cache_creation_input_tokens")
+                       or a.get("gen_ai.usage.cache_creation.input_tokens"))
+    start_ns = _int(span.get("startTimeUnixNano"))
+    end_ns = _int(span.get("endTimeUnixNano"))
+    status_code = (span.get("status") or {}).get("code")
+    trace_id, span_id = span.get("traceId"), span.get("spanId")
+    return EventIn(
+        request_id=a.get("gen_ai.response.id") or (f"otel:{trace_id}:{span_id}" if trace_id and span_id else None),
+        timestamp=datetime.fromtimestamp(start_ns / 1e9, UTC) if start_ns else None,
+        provider=provider,
+        model=a.get("gen_ai.response.model") or a.get("gen_ai.request.model") or "unknown",
+        operation=a.get("gen_ai.operation.name") or "chat",
+        project=a.get("burnrate.project") or a.get("service.name") or "default",
+        feature=a.get("burnrate.feature"),
+        team=a.get("burnrate.team"),
+        environment=a.get("deployment.environment.name") or a.get("deployment.environment") or "production",
+        customer_id=a.get("burnrate.customer_id"),
+        user_id=a.get("user.id") or a.get("enduser.id"),
+        trace_id=trace_id,
+        # OTel input_tokens is the full prompt; split out cache reads/writes.
+        input_tokens=max(0, input_total - cache_read - cache_write),
+        cached_input_tokens=cache_read,
+        cache_write_tokens=cache_write,
+        output_tokens=output,
+        latency_ms=(end_ns - start_ns) // 1_000_000 if start_ns and end_ns else None,
+        status="error" if status_code in (2, "STATUS_CODE_ERROR") else "success",
+    )
 
 
 # ---- Claude Code (coding-agent) metrics --------------------------------------------------------
@@ -111,24 +136,31 @@ def metrics_to_events(payload: dict) -> tuple[list[EventIn], list[IngestError]]:
                     errors.append(IngestError(index=-1, error=f"{name}: cumulative temporality is not supported; "
                                               "set OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta"))
                     continue
-                for dp in agg.get("dataPoints", []):
-                    a = {**resource, **_attrs(dp.get("attributes", []))}
-                    user = a.get("user.email") or a.get("user.account_uuid") or a.get("user.id")
-                    key = (dp.get("timeUnixNano"), a.get("session.id"), a.get("model"), user, a.get("query_source"))
+                for i, dp in enumerate(agg.get("dataPoints", [])):
+                    try:
+                        a = {**resource, **_attrs(dp.get("attributes", []))}
+                        value = _number(dp)
+                        user = a.get("user.email") or a.get("user.account_uuid") or a.get("user.id")
+                        key = (dp.get("timeUnixNano"), a.get("session.id"), a.get("model"), user,
+                               a.get("query_source"))
+                    except BAD_INPUT as e:
+                        errors.append(IngestError(index=i, error=f"{name}: {_describe(e)}"))
+                        continue
                     g = groups.setdefault(key, {"attrs": a, "tokens": {}, "cost": 0.0})
                     if name == TOKEN_METRIC and a.get("type") in TOKEN_FIELDS:
                         field = TOKEN_FIELDS[a["type"]]
-                        g["tokens"][field] = g["tokens"].get(field, 0) + int(_number(dp))
+                        g["tokens"][field] = g["tokens"].get(field, 0) + int(value)
                     elif name == COST_METRIC:
-                        g["cost"] += _number(dp)
+                        g["cost"] += value
 
     events: list[EventIn] = []
     for (ts_ns, session, model, user, source), g in groups.items():
         a = g["attrs"]
         try:
             events.append(EventIn(
-                request_id=f"cc:{session}:{model}:{ts_ns}:{source}:{user}"[:128],
-                timestamp=datetime.fromtimestamp(int(ts_ns) / 1e9, UTC) if ts_ns else None,
+                # Hashed so long session ids / emails can't be truncated into collisions.
+                request_id="cc:" + hashlib.sha256(f"{session}|{model}|{ts_ns}|{source}|{user}".encode()).hexdigest(),
+                timestamp=datetime.fromtimestamp(_int(ts_ns) / 1e9, UTC) if ts_ns else None,
                 provider="anthropic",
                 model=model or "unknown",
                 operation="coding_agent",
@@ -142,6 +174,6 @@ def metrics_to_events(payload: dict) -> tuple[list[EventIn], list[IngestError]]:
                 attributes={k: a[k] for k in ("service.name", "terminal.type", "app.version") if a.get(k)},
                 **g["tokens"],
             ))
-        except ValidationError as e:
-            errors.append(IngestError(index=-1, error=str(e.errors()[0]["msg"])))
+        except BAD_INPUT as e:
+            errors.append(IngestError(index=-1, error=_describe(e)))
     return events, errors
