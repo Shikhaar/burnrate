@@ -102,6 +102,8 @@ export interface UsageEvent {
   cost_usd: number;
   latency_ms: number | null;
   status: EventStatus;
+  /** How cost_usd was derived. */
+  pricing?: "priced" | "provider_reported" | "unpriced";
 }
 
 export interface EventsPage {
@@ -307,7 +309,8 @@ const fetcher = <T,>(path: string) => request<T>(path);
 
 const defaultSWR: SWRConfiguration = {
   revalidateOnFocus: false,
-  keepPreviousData: true,
+  // No keepPreviousData: showing the previous dimension/window's numbers under new labels (or after a
+  // failed fetch) is worse than a brief skeleton.
   shouldRetryOnError: true,
   errorRetryCount: 2,
 };

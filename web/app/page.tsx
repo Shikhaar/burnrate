@@ -225,7 +225,7 @@ function LatestAnomalies({ days }: { days: number }) {
         title="Latest anomalies"
         description="Unusual daily spend vs. trailing baseline"
         actions={
-          <Link href="/forecast" className="flex items-center gap-1 text-xs text-muted hover:text-fg">
+          <Link href={`/forecast${days !== 30 ? `?days=${days}` : ""}`} className="flex items-center gap-1 text-xs text-muted hover:text-fg">
             View all <ArrowRight className="size-3" aria-hidden />
           </Link>
         }

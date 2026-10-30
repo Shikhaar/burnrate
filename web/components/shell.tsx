@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { API_URL } from "@/lib/api";
 import { RANGE_OPTIONS, useDays } from "@/lib/use-days";
 import { Segmented } from "./ui";
@@ -159,10 +159,38 @@ function currentTitle(pathname: string) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const drawer = useRef<HTMLElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
 
+  // Close on navigation.
+  useEffect(() => setOpen(false), [pathname]);
+
+  // Modal drawer: focus moves in on open, Tab is trapped, Escape closes, focus returns to the menu button.
   useEffect(() => {
+    if (open) {
+      wasOpen.current = true;
+      closeButton.current?.focus();
+    } else if (wasOpen.current) {
+      wasOpen.current = false;
+      menuButton.current?.focus();
+    }
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return setOpen(false);
+      if (e.key !== "Tab" || !drawer.current) return;
+      const focusable = drawer.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled])");
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
@@ -179,12 +207,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile drawer */}
-      <div className={clsx("fixed inset-0 z-50 lg:hidden", open ? "pointer-events-auto" : "pointer-events-none")} aria-hidden={!open}>
+      <div
+        className={clsx("fixed inset-0 z-50 lg:hidden", open ? "pointer-events-auto" : "pointer-events-none")}
+        aria-hidden={!open}
+        inert={!open}
+      >
         <div
           className={clsx("absolute inset-0 bg-black/50 backdrop-blur-[2px] transition-opacity", open ? "opacity-100" : "opacity-0")}
           onClick={() => setOpen(false)}
         />
         <aside
+          ref={drawer}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Navigation"
           className={clsx(
             "absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-border bg-surface px-3 py-4 transition-transform duration-200",
             open ? "translate-x-0" : "-translate-x-full",
@@ -192,7 +228,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         >
           <div className="mb-6 flex items-center justify-between px-1.5">
             <Logo />
-            <button type="button" onClick={() => setOpen(false)} className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-2" aria-label="Close menu">
+            <button ref={closeButton} type="button" onClick={() => setOpen(false)} className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-2" aria-label="Close menu">
               <X className="size-4" aria-hidden />
             </button>
           </div>
@@ -204,8 +240,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="lg:pl-60">
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-bg/80 px-4 backdrop-blur-md sm:px-6">
           <button
+            ref={menuButton}
             type="button"
             onClick={() => setOpen(true)}
+            aria-expanded={open}
             className="grid size-8 place-items-center rounded-lg border border-border bg-surface text-muted hover:text-fg lg:hidden"
             aria-label="Open menu"
           >

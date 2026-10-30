@@ -10,8 +10,13 @@ const isNum = (n: unknown): n is number => typeof n === "number" && Number.isFin
 export function usdCompact(n: number | null | undefined): string {
   if (!isNum(n)) return "—";
   const abs = Math.abs(n);
-  if (abs < 1000) return abs < 10 && abs !== 0 ? usd2.format(n) : usd0.format(n);
-  return `${n < 0 ? "-" : ""}$${compactUsd.format(abs).toLowerCase()}`;
+  const sign = n < 0 ? "-" : "";
+  if (abs === 0) return "$0";
+  if (abs < 0.01) return `${sign}<$0.01`;
+  if (abs < 10) return usd2.format(n);
+  // Decide on compact notation after rounding, so 999.6 reads "$1k" like 1000 does.
+  if (Math.round(abs) < 1000) return usd0.format(n);
+  return `${sign}$${compactUsd.format(abs).toLowerCase()}`;
 }
 
 /** Exact currency for tables; sub-cent values get more precision. */
@@ -27,14 +32,15 @@ export function usd(n: number | null | undefined): string {
 export function usdFine(n: number | null | undefined): string {
   if (!isNum(n)) return "—";
   if (Math.abs(n) >= 100) return usd2.format(n);
-  if (n !== 0 && Math.abs(n) < 0.0001) return `$${n.toFixed(6)}`;
-  return `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(4)}`;
+  const sign = n < 0 ? "-" : "";
+  if (n !== 0 && Math.abs(n) < 0.0001) return `${sign}$${Math.abs(n).toFixed(6)}`;
+  return `${sign}$${Math.abs(n).toFixed(4)}`;
 }
 
 /** Price per million tokens, e.g. $0.075 or $15.00 */
 export function usdPrice(n: number | null | undefined): string {
   if (!isNum(n)) return "—";
-  if (n !== 0 && n < 1) return `$${n.toFixed(3).replace(/0$/, "")}`;
+  if (n !== 0 && Math.abs(n) < 1) return `${n < 0 ? "-" : ""}$${Math.abs(n).toFixed(3).replace(/0$/, "")}`;
   return usd2.format(n);
 }
 
@@ -57,13 +63,18 @@ export function share(n: number | null | undefined, digits = 1): string {
  */
 export function pct(n: number | null | undefined, digits = 1): string {
   if (!isNum(n)) return "—";
-  const sign = n > 0 ? "+" : "";
-  return `${sign}${n.toFixed(digits)}%`;
+  const fixed = n.toFixed(digits);
+  if (Number(fixed) === 0) return `${(0).toFixed(digits)}%`; // no "-0.0%"
+  return `${n > 0 ? "+" : ""}${fixed}%`;
 }
 
 export function ms(n: number | null | undefined): string {
   if (!isNum(n)) return "—";
-  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}s`;
+  if (n >= 1000) {
+    const secs = n / 1000;
+    // Pick precision after rounding so 9960ms reads "10s", not "10.0s".
+    return Number(secs.toFixed(1)) >= 10 ? `${Math.round(secs)}s` : `${secs.toFixed(1)}s`;
+  }
   return `${Math.round(n)}ms`;
 }
 

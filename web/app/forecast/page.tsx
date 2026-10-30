@@ -49,6 +49,10 @@ function buildRows(f: Forecast, mode: Mode): Row[] {
   const remaining = days.filter((d) => d.actual_usd === null && d.forecast_usd !== null).length;
   const lowGap = Math.max(0, f.projected_usd - f.low_usd);
   const highGap = Math.max(0, f.high_usd - f.projected_usd);
+  // The projection also counts what today is still expected to spend; fold it into the first forecast
+  // step so the cumulative line lands exactly on projected_usd.
+  const futureSum = days.reduce((s, d) => s + (d.actual_usd === null ? (d.forecast_usd ?? 0) : 0), 0);
+  const todayRest = Math.max(0, f.projected_usd - f.month_to_date_usd - futureSum);
   let cum = 0;
   let step = 0;
   let lastActualIdx = -1;
@@ -58,14 +62,20 @@ function buildRows(f: Forecast, mode: Mode): Row[] {
       lastActualIdx = i;
       return { date: d.date, actual: cum, forecast: null, band: null };
     }
+    if (step === 0) cum += todayRest;
     cum += d.forecast_usd ?? 0;
     step += 1;
     const spread = remaining ? Math.sqrt(step / remaining) : 0;
     return { date: d.date, actual: null, forecast: cum, band: [Math.max(0, cum - lowGap * spread), cum + highGap * spread] };
   });
-  if (lastActualIdx >= 0 && remaining > 0) {
+  if (lastActualIdx >= 0) {
     const r = rows[lastActualIdx];
-    rows[lastActualIdx] = { ...r, forecast: r.actual, band: [r.actual ?? 0, r.actual ?? 0] };
+    if (remaining > 0) {
+      rows[lastActualIdx] = { ...r, forecast: r.actual, band: [r.actual ?? 0, r.actual ?? 0] };
+    } else if (todayRest > 0) {
+      // Last day of the month: the only thing left to forecast is the rest of today.
+      rows[lastActualIdx] = { ...r, forecast: f.projected_usd, band: [f.low_usd, f.high_usd] };
+    }
   }
   return rows;
 }
@@ -74,7 +84,9 @@ export default function ForecastPage() {
   const [days] = useDays();
   const forecast = useForecast();
   const f = forecast.data;
-  const remainingDays = f ? f.daily.filter((d) => d.actual_usd === null).length : 0;
+  // Today counts as remaining while part of its expected spend is still to come.
+  const stillToCome = f ? Math.max(0, f.projected_usd - f.month_to_date_usd) : 0;
+  const remainingDays = f ? f.daily.filter((d) => d.actual_usd === null).length + (stillToCome > 0 ? 1 : 0) : 0;
 
   return (
     <>
@@ -106,7 +118,7 @@ export default function ForecastPage() {
             icon={<Gauge className="size-4" aria-hidden />}
             loading={!f}
             value={String(remainingDays)}
-            sub={f && remainingDays ? `~${usdCompact((f.projected_usd - f.month_to_date_usd) / remainingDays)} / day expected` : "Month complete"}
+            sub={f && remainingDays ? `~${usdCompact(stillToCome / remainingDays)} / day expected, incl. today` : "Month complete"}
           />
         </div>
       )}

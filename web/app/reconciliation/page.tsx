@@ -244,17 +244,23 @@ interface AggRow {
   billed: number | null;
 }
 
-/** Sum providers per day. A day's billed total is null if no included provider has billed it yet. */
+/**
+ * Sum providers per day. A day's billed total is null unless every included provider has billed it:
+ * comparing a partial bill against the full estimate would show a false shortfall.
+ */
 function aggregate(r: Reconciliation, provider: string): AggRow[] {
-  const map = new Map<string, AggRow>();
+  const map = new Map<string, AggRow & { complete: boolean }>();
   // "All" only sums providers that report billing, so estimated and billed stay comparable.
   const unbilled = new Set(r.items.filter((i) => i.status === "no_billing_data").map((i) => i.provider));
   for (const d of r.daily) {
     if (provider === "all" ? unbilled.has(d.provider) : d.provider !== provider) continue;
-    const row = map.get(d.date) ?? { date: d.date, estimated: 0, billed: null };
+    const row = map.get(d.date) ?? { date: d.date, estimated: 0, billed: 0, complete: true };
     row.estimated += d.estimated_usd ?? 0;
-    if (d.billed_usd !== null && d.billed_usd !== undefined) row.billed = (row.billed ?? 0) + d.billed_usd;
+    if (d.billed_usd === null || d.billed_usd === undefined) row.complete = false;
+    else row.billed = (row.billed ?? 0) + d.billed_usd;
     map.set(d.date, row);
   }
-  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return [...map.values()]
+    .map(({ complete, ...row }) => ({ ...row, billed: complete ? row.billed : null }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }

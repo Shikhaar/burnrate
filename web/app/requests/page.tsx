@@ -7,7 +7,7 @@ import { providerColor, providerLabel } from "@/lib/colors";
 import { ms, num, timestamp, usdFine } from "@/lib/format";
 import { useQueryPatch } from "@/lib/use-days";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const PAGE_SIZE = 50;
 
@@ -21,6 +21,8 @@ function StatusBadge({ status }: { status: UsageEvent["status"] }) {
 
 function CustomerFilter({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
+  // Follow external changes (Clear, back/forward) without remounting, so focus stays in the input.
+  useEffect(() => setDraft(value), [value]);
   return (
     <label className="flex min-w-0 flex-col gap-1">
       <span className="text-[11px] font-medium uppercase tracking-wide text-subtle">Customer</span>
@@ -44,13 +46,18 @@ export default function RequestsPage() {
   const project = params.get("project") ?? "";
   const feature = params.get("feature") ?? "";
   const customer = params.get("customer") ?? "";
-  const page = Math.max(0, Number(params.get("page") ?? 0) || 0);
+  const requestedPage = Math.max(0, Math.floor(Number(params.get("page") ?? 0)) || 0);
 
   const meta = useMeta();
-  const events = useEvents({ limit: PAGE_SIZE, offset: page * PAGE_SIZE, provider, model, project, feature, customer });
+  const events = useEvents({ limit: PAGE_SIZE, offset: requestedPage * PAGE_SIZE, provider, model, project, feature, customer });
 
   const total = events.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = events.data ? Math.min(requestedPage, pages - 1) : requestedPage;
+  // An out-of-range ?page= (stale link, filters narrowed) snaps back to the last real page.
+  useEffect(() => {
+    if (events.data && requestedPage > pages - 1) patch({ page: pages > 1 ? String(pages - 1) : null });
+  }, [events.data, requestedPage, pages, patch]);
   const from = total ? page * PAGE_SIZE + 1 : 0;
   const to = Math.min(total, (page + 1) * PAGE_SIZE);
   const filtered = Boolean(provider || model || project || feature || customer);
@@ -92,7 +99,7 @@ export default function RequestsPage() {
               options={(meta.data?.features ?? []).map((p) => ({ value: p, label: p }))}
               placeholder="All features"
             />
-            <CustomerFilter key={customer} value={customer} onCommit={(v) => setFilter("customer", v)} />
+            <CustomerFilter value={customer} onCommit={(v) => setFilter("customer", v)} />
           </div>
           {filtered ? (
             <Button variant="ghost" onClick={() => patch({ provider: null, model: null, project: null, feature: null, customer: null, page: null })}>
@@ -110,7 +117,7 @@ export default function RequestsPage() {
                 <TableSkeleton rows={10} cols={8} />
               </div>
             }
-            isEmpty={(d) => d.items.length === 0}
+            isEmpty={(d) => d.total === 0}
             empty={
               <EmptyState
                 title={filtered ? "No requests match these filters" : "No requests yet"}
@@ -170,7 +177,16 @@ export default function RequestsPage() {
                           {e.reasoning_tokens ? num(e.reasoning_tokens) : "—"}
                         </Td>
                         <Td align="right" className="font-medium text-fg">
-                          {usdFine(e.cost_usd)}
+                          {e.pricing === "unpriced" ? (
+                            <span className="text-amber-500" title="No registry price for this model; counted as $0">
+                              unpriced
+                            </span>
+                          ) : (
+                            <span title={e.pricing === "provider_reported" ? "Cost reported by the provider" : undefined}>
+                              {usdFine(e.cost_usd)}
+                              {e.pricing === "provider_reported" ? <sup className="ml-0.5 text-muted">*</sup> : null}
+                            </span>
+                          )}
                         </Td>
                         <Td align="right" className="hidden text-fg-2 sm:table-cell">
                           {ms(e.latency_ms)}
