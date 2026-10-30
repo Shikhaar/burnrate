@@ -44,6 +44,14 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Two ingestion paths** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution) **or** OTLP/HTTP using OpenTelemetry GenAI semantic conventions. |
 | **Production basics** | Hashed API keys, idempotent ingestion, optional dashboard token, health checks, Docker, CI on SQLite + Postgres. |
 
+## Screenshots
+
+| Anomalies & forecast | Savings insights |
+|---|---|
+| ![Forecast](docs/screenshots/forecast.png) | ![Insights](docs/screenshots/insights.png) |
+| **Billing reconciliation** | **Explore by feature** |
+| ![Reconciliation](docs/screenshots/reconciliation.png) | ![Explore](docs/screenshots/explore.png) |
+
 ## Quickstart
 
 ### Docker (Postgres + API + dashboard)
