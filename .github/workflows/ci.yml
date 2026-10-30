@@ -50,6 +50,21 @@ jobs:
                   r = c.get(path)
                   assert r.status_code == 200, (path, r.status_code, r.text[:300])
               assert c.get("/api/overview").json()["total_cost_usd"] > 0
+
+              # Ingestion on the real database: idempotency via ON CONFLICT, cost derivation, OTLP.
+              from burnrate.db import SessionLocal
+              from burnrate.security import create_api_key
+              with SessionLocal() as s:
+                  h = {"X-API-Key": create_api_key(s, "ci")}
+              ev = {"provider": "openai", "model": "gpt-4o-2024-08-06", "input_tokens": 1000, "output_tokens": 100}
+              r = c.post("/v1/events", json={"events": [{**ev, "request_id": "ci-1"}, {**ev, "request_id": "ci-1"}]},
+                         headers=h).json()
+              assert (r["accepted"], r["duplicates"]) == (1, 1), r
+              r = c.post("/v1/events", json={"events": [{**ev, "request_id": "ci-1"}, {**ev, "request_id": "ci-2"}, ev]},
+                         headers=h).json()
+              assert (r["accepted"], r["duplicates"]) == (2, 1), r
+              items = c.get("/api/events?limit=3").json()["items"]
+              assert all(i["cost_usd"] > 0 for i in items), items
           print("smoke ok")
           EOF
 
