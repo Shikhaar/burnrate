@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: burnrate
+      POSTGRES_PASSWORD: burnrate
+      POSTGRES_DB: burnrate
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U burnrate"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    environment:
+      BURNRATE_DATABASE_URL: postgresql+psycopg://burnrate:burnrate@db:5432/burnrate
+      BURNRATE_CORS_ORIGINS: '["http://localhost:3000"]'
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # One-shot: loads 90 days of demo data. `docker compose run --rm seed`
+  seed:
+    build: ./backend
+    command: ["burnrate", "seed"]
+    environment:
+      BURNRATE_DATABASE_URL: postgresql+psycopg://burnrate:burnrate@db:5432/burnrate
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles: ["seed"]
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

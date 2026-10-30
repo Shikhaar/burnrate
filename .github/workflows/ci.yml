@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        database: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: burnrate
+          POSTGRES_PASSWORD: burnrate
+          POSTGRES_DB: burnrate
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests
+      - name: Unit + API tests
+        run: pytest -q
+      - name: Seed + smoke test against ${{ matrix.database }}
+        env:
+          BURNRATE_DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://burnrate:burnrate@localhost:5432/burnrate' || 'sqlite:///./ci.db' }}
+        run: |
+          burnrate seed --days 45
+          python - <<'EOF'
+          from fastapi.testclient import TestClient
+          from burnrate.main import app
+          with TestClient(app) as c:
+              for path in ["/healthz", "/api/overview", "/api/breakdown?dimension=feature", "/api/timeseries",
+                           "/api/anomalies", "/api/forecast", "/api/reconciliation", "/api/insights",
+                           "/api/budgets", "/api/events", "/api/pricing", "/api/meta"]:
+                  r = c.get(path)
+                  assert r.status_code == 200, (path, r.status_code, r.text[:300])
+              assert c.get("/api/overview").json()["total_cost_usd"] > 0
+          print("smoke ok")
+          EOF
+
+  sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.13"]
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pytest && pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build

@@ -12,7 +12,7 @@ Common query params: `days` (window length, default 30). Dimension values: `prov
 | GET | `/api/events?limit=50&offset=0&provider=&model=&project=` | `{total, items:[{id,timestamp,provider,model,project,feature,team,environment,customer_id,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_usd,latency_ms,status}]}` |
 | GET | `/api/anomalies?days=30` | `{items:[{id,date,dimension,key,cost_usd,baseline_usd,z_score,change_pct,severity:"low"|"medium"|"high",message}]}` |
 | GET | `/api/forecast` | `{month, month_to_date_usd, projected_usd, low_usd, high_usd, daily:[{date, actual_usd|null, forecast_usd|null}]}` |
-| GET | `/api/reconciliation?days=30` | `{items:[{provider,estimated_usd,billed_usd,delta_usd,delta_pct}], daily:[{date,provider,estimated_usd,billed_usd}]}` |
+| GET | `/api/reconciliation?days=30` | `{tolerance_pct, items:[{provider,estimated_usd,billed_usd,delta_usd,delta_pct,status:"ok"|"investigate"|"no_billing_data"}], daily:[{date,provider,estimated_usd,billed_usd|null}]}` — numeric item fields are null when status is `no_billing_data`; totals only cover days the provider has billed |
 | GET | `/api/budgets` | `{items:[{id,name,scope_dimension|null,scope_value|null,monthly_limit_usd,alert_threshold,spent_usd,projected_usd,utilization,status:"ok"|"warning"|"exceeded"}]}` |
 | POST | `/api/budgets` | body `{name, scope_dimension|null, scope_value|null, monthly_limit_usd, alert_threshold}` → budget object |
 | DELETE | `/api/budgets/{id}` | 204 |

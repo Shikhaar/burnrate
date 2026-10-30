@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "burnrate-sdk"
+version = "0.1.0"
+description = "Report LLM token usage and cost attribution to Burnrate. Zero dependencies."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["burnrate_sdk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from types import SimpleNamespace
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.orm import Session
 
 from burnrate.models import BilledCost, Budget, EventCost, UsageEvent
@@ -160,6 +160,9 @@ def generate(session: Session, days: int = 90, seed: int = 7, reset: bool = True
     for i in range(0, len(events), 5_000):
         session.execute(insert(UsageEvent), events[i : i + 5_000])
         session.execute(insert(EventCost), costs[i : i + 5_000])
+    if session.get_bind().dialect.name == "postgresql" and events:
+        # Explicit ids bypass the serial sequence; move it past them so live ingestion doesn't collide.
+        session.execute(text("SELECT setval(pg_get_serial_sequence('usage_events', 'id'), :v)"), {"v": next_id - 1})
 
     # Provider billing data lags ~1 day.
     session.execute(insert(BilledCost), [
