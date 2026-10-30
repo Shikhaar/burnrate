@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-Dimension = Literal["provider", "model", "project", "feature", "team", "environment", "customer"]
+Dimension = Literal["provider", "model", "project", "feature", "team", "environment", "customer", "user"]
 
 
 class EventIn(BaseModel):

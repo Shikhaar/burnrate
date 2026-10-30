@@ -1,7 +1,7 @@
 # Burnrate API contract (dashboard ↔ backend)
 
 Base URL: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`). All money is USD floats, all dates ISO-8601 (`YYYY-MM-DD` for days, full timestamps for events).
-Common query params: `days` (window length, default 30). Dimension values: `provider | model | project | feature | team | environment | customer`.
+Common query params: `days` (window length, default 30). Dimension values: `provider | model | project | feature | team | environment | customer | user`.
 
 | Method | Path | Response |
 |---|---|---|
@@ -21,4 +21,4 @@ Common query params: `days` (window length, default 30). Dimension values: `prov
 | POST | `/api/alerts/evaluate` | `{fired}` — evaluate now (normally run from cron via `burnrate alerts`) |
 | GET | `/api/pricing` | `{items:[{provider,model,input_per_mtok,output_per_mtok,cached_input_per_mtok,cache_write_per_mtok,effective_from}]}` |
 
-Ingestion (used by SDKs, not the dashboard): `POST /v1/events` with header `X-API-Key`, body `{events:[...]}` → `{accepted, rejected, errors[]}`.
+Ingestion (used by SDKs, not the dashboard): OTLP/HTTP JSON at `POST /v1/otlp/v1/traces` (GenAI spans) and `POST /v1/otlp/v1/metrics` (Claude Code counters). `POST /v1/events` with header `X-API-Key`, body `{events:[...]}` → `{accepted, rejected, errors[]}`.

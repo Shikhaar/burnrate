@@ -35,6 +35,7 @@ class Workload:
     operation: str = "chat"
     latency_ms: int = 1500
     reasoning_share: float = 0.0
+    environment: str | None = None  # fixed environment (otherwise ~6% staging)
 
 
 WORKLOADS = [
@@ -59,6 +60,11 @@ WORKLOADS = [
              latency_ms=700),
     Workload("data-extraction", "invoice-parsing", "finance-ops", "anthropic", "claude-haiku-4-5", 90, 4_000, 500,
              error_rate=0.03, latency_ms=2100),
+    # Coding agents (Claude Code telemetry), attributed per engineer.
+    Workload("claude-code", "claude-code:main", "platform", "anthropic", "claude-opus-4-5", 55, 42_000, 1_400,
+             cache_ratio=0.85, error_rate=0.01, operation="coding_agent", latency_ms=12000, environment="development"),
+    Workload("claude-code", "claude-code:auxiliary", "platform", "anthropic", "claude-haiku-4-5", 40, 3_000, 150,
+             operation="coding_agent", latency_ms=900, environment="development"),
     Workload("data-extraction", "contract-review", "finance-ops", "openai", "o3", 8, 22_000, 3_000,
              latency_ms=34000, reasoning_share=0.6),
 ]
@@ -66,12 +72,15 @@ WORKLOADS = [
 CUSTOMERS = ["acme-corp", "globex", "initech", "umbrella", "hooli", "stark-ind", "wayne-ent", "soylent",
              "cyberdyne", "tyrell"]
 CUSTOMER_WEIGHTS = [30, 18, 12, 10, 8, 7, 6, 4, 3, 2]
+ENGINEERS = ["priya@example.dev", "marco@example.dev", "aisha@example.dev", "chen@example.dev",
+             "sam@example.dev", "lena@example.dev", "omar@example.dev", "julia@example.dev"]
+ENGINEER_WEIGHTS = [26, 18, 14, 12, 10, 8, 7, 5]
 CUSTOMER_FACING = {"support-agent", "rag-search", "data-extraction"}
 BILLING_DRIFT = {"openai": 1.011, "anthropic": 1.004, "google": 1.047}
 
 DEMO_BUDGETS = [
-    ("Company AI spend", None, None, 2_500.0, 0.8),
-    ("Support agent", "project", "support-agent", 850.0, 0.8),
+    ("Company AI spend", None, None, 3_400.0, 0.8),
+    ("Support agent", "project", "support-agent", 780.0, 0.8),
     ("Search team", "team", "search", 380.0, 0.85),
     ("Growth experiments", "team", "growth", 150.0, 0.75),
 ]
@@ -128,10 +137,10 @@ def generate(session: Session, days: int = 90, seed: int = 7, reset: bool = True
                     "project": w.project,
                     "feature": w.feature,
                     "team": w.team,
-                    "environment": "staging" if rng.random() < 0.06 else "production",
+                    "environment": w.environment or ("staging" if rng.random() < 0.06 else "production"),
                     "customer_id": rng.choices(CUSTOMERS, CUSTOMER_WEIGHTS)[0]
                     if w.project in CUSTOMER_FACING else None,
-                    "user_id": None,
+                    "user_id": rng.choices(ENGINEERS, ENGINEER_WEIGHTS)[0] if w.project == "claude-code" else None,
                     "trace_id": None,
                     "input_tokens": prompt - cached,
                     "cached_input_tokens": cached,

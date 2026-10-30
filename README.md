@@ -38,6 +38,7 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Forecasting** | Month-end projection from a 28-day trend × weekday seasonality, with a 90% confidence band. |
 | **Anomaly detection** | Robust z-score (median/MAD) per project, feature and model, with severity and plain-English explanations. |
 | **Budgets** | Monthly limits company-wide or per project, team, feature or customer, with projected-overrun warnings. |
+| **Coding-agent spend** | Point Claude Code's built-in OpenTelemetry export at Burnrate to see coding-agent spend per engineer, model and session next to production spend. |
 | **Alerts** | Budget and anomaly alerts sent to Slack or any webhook. Deduplicated, so each condition notifies once (`burnrate alerts` from cron). |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
 | **Two ingestion paths** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution) **or** OTLP/HTTP using OpenTelemetry GenAI semantic conventions. |
@@ -95,6 +96,19 @@ br.trackOpenAI(res, { feature: "answer-synthesis", customer_id: "acme" });
 
 **OpenTelemetry:** point any OTLP/HTTP JSON exporter at `POST /v1/otlp/v1/traces` with the `X-API-Key` header. Spans carrying `gen_ai.*` attributes become usage events. Add `burnrate.feature`, `burnrate.team` and `burnrate.customer_id` for attribution.
 
+**Claude Code (coding-agent spend per engineer)** — no code changes, just environment variables (or managed settings):
+
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://burnrate.internal/v1/otlp      # exporter appends /v1/metrics
+export OTEL_EXPORTER_OTLP_HEADERS="X-API-Key=br_live_…"
+export OTEL_RESOURCE_ATTRIBUTES="burnrate.team=platform"                   # optional attribution
+```
+
+The `claude_code.token.usage` and `claude_code.cost.usage` counters become usage events under project `claude-code`, attributed by `user.email`, model and session. Burnrate prices them from its registry. For models it doesn't have a price for yet, it falls back to the cost Claude Code reports.
+
 **Raw HTTP**
 
 ```bash
@@ -112,11 +126,12 @@ burnrate sync all --days 31
 
 ## Demo dataset
 
-`burnrate seed` generates a fictional SaaS company with 12 AI workloads across 5 products, 6 teams and 10 customers (about 260k calls over 90 days). It contains planted problems for the dashboard to find:
+`burnrate seed` generates a fictional SaaS company with 14 AI workloads across 6 products (including Claude Code), 6 teams and 10 customers (about 260k calls over 90 days). It contains planted problems for the dashboard to find:
 
 - a **retry loop** in the support agent's ticket triage (last 3 days, about 3×) → high-severity anomaly, exceeded budget
 - a **bulk content job** run on a frontier model → past anomaly
 - **Opus used for sentiment tagging** (900-token prompts) → model-downgrade insight
+- **Claude Code** usage across 8 engineers, with one power user → per-engineer breakdown
 - **12k-token RAG prompts with no caching** → prompt-caching insight
 - a **Google bill running 4.7% above estimate** → reconciliation flag
 
@@ -135,7 +150,7 @@ docs/        architecture, event schema, API contract
 ## Roadmap
 
 - LangChain / LlamaIndex / Vercel AI SDK callbacks
-- Coding-agent spend (Claude Code, Cursor) via admin and analytics APIs
+- More coding agents (Cursor, Copilot, Codex) via their admin APIs
 - Email alerts and per-team routing
 - Multi-tenant orgs with SSO and role-based access control
 - ClickHouse rollups for very high event volumes

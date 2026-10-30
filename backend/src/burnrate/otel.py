@@ -78,3 +78,70 @@ def spans_to_events(payload: dict) -> tuple[list[EventIn], list[IngestError]]:
                 except ValidationError as e:
                     errors.append(IngestError(index=idx, error=str(e.errors()[0]["msg"])))
     return events, errors
+
+
+# ---- Claude Code (coding-agent) metrics --------------------------------------------------------
+# Claude Code exports delta counters `claude_code.token.usage` (attribute `type` = input | output |
+# cacheRead | cacheCreation) and `claude_code.cost.usage` (USD), tagged with model, session and user.
+# Datapoints sharing (time, session, model, user, query_source) are folded into one usage event.
+
+TOKEN_METRIC = "claude_code.token.usage"
+COST_METRIC = "claude_code.cost.usage"
+TOKEN_FIELDS = {"input": "input_tokens", "output": "output_tokens", "cacheRead": "cached_input_tokens",
+                "cacheCreation": "cache_write_tokens"}
+CUMULATIVE = 2
+
+
+def _number(dp: dict) -> float:
+    return float(dp.get("asDouble", dp.get("asInt", 0)) or 0)
+
+
+def metrics_to_events(payload: dict) -> tuple[list[EventIn], list[IngestError]]:
+    groups: dict[tuple, dict] = {}
+    errors: list[IngestError] = []
+    for rs in payload.get("resourceMetrics", []):
+        resource = _attrs(rs.get("resource", {}).get("attributes", []))
+        for sm in rs.get("scopeMetrics", []):
+            for metric in sm.get("metrics", []):
+                name = metric.get("name")
+                if name not in (TOKEN_METRIC, COST_METRIC):
+                    continue
+                agg = metric.get("sum") or {}
+                if agg.get("aggregationTemporality") == CUMULATIVE:
+                    errors.append(IngestError(index=-1, error=f"{name}: cumulative temporality is not supported; "
+                                              "set OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=delta"))
+                    continue
+                for dp in agg.get("dataPoints", []):
+                    a = {**resource, **_attrs(dp.get("attributes", []))}
+                    user = a.get("user.email") or a.get("user.account_uuid") or a.get("user.id")
+                    key = (dp.get("timeUnixNano"), a.get("session.id"), a.get("model"), user, a.get("query_source"))
+                    g = groups.setdefault(key, {"attrs": a, "tokens": {}, "cost": 0.0})
+                    if name == TOKEN_METRIC and a.get("type") in TOKEN_FIELDS:
+                        field = TOKEN_FIELDS[a["type"]]
+                        g["tokens"][field] = g["tokens"].get(field, 0) + int(_number(dp))
+                    elif name == COST_METRIC:
+                        g["cost"] += _number(dp)
+
+    events: list[EventIn] = []
+    for (ts_ns, session, model, user, source), g in groups.items():
+        a = g["attrs"]
+        try:
+            events.append(EventIn(
+                request_id=f"cc:{session}:{model}:{ts_ns}:{source}:{user}"[:128],
+                timestamp=datetime.fromtimestamp(int(ts_ns) / 1e9, UTC) if ts_ns else None,
+                provider="anthropic",
+                model=model or "unknown",
+                operation="coding_agent",
+                project=a.get("burnrate.project") or "claude-code",
+                feature=f"claude-code:{source}" if source else "claude-code",
+                team=a.get("burnrate.team") or a.get("team"),
+                environment=a.get("deployment.environment") or "development",
+                user_id=user,
+                trace_id=(session or "")[:64] or None,
+                provider_reported_cost_usd=round(g["cost"], 8) if g["cost"] else None,
+                attributes={k: a[k] for k in ("service.name", "terminal.type", "app.version") if a.get(k)},
+                **g["tokens"],
+            ))
+        except ValidationError as e:
+            errors.append(IngestError(index=-1, error=str(e.errors()[0]["msg"])))
+    return events, errors

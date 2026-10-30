@@ -19,6 +19,7 @@ DIMENSIONS = {
     "team": UsageEvent.team,
     "environment": UsageEvent.environment,
     "customer": UsageEvent.customer_id,
+    "user": UsageEvent.user_id,
 }
 
 COST = func.coalesce(func.sum(EventCost.total_cost_usd), 0.0)

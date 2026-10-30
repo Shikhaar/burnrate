@@ -138,3 +138,49 @@ def test_alerts_fire_once_and_deliver_to_webhook(seeded, session, monkeypatch):
     again = evaluate(session, httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200))))
     assert again == []
     assert len(seeded.get("/api/alerts").json()["items"]) == len(fired)
+
+
+def _claude_code_payload(ts_ns: int, temporality: int = 1) -> dict:
+    def a(k, v):
+        return {"key": k, "value": {"stringValue": v}}
+
+    common = [a("session.id", "sess-1"), a("model", "claude-opus-4-5-20251101"), a("user.email", "dev@example.dev"),
+              a("query_source", "main")]
+
+    def dp(value, extra=()):
+        return {"timeUnixNano": str(ts_ns), "asDouble": value, "attributes": [*common, *extra]}
+
+    return {"resourceMetrics": [{
+        "resource": {"attributes": [a("service.name", "claude-code"), a("burnrate.team", "platform")]},
+        "scopeMetrics": [{"metrics": [
+            {"name": "claude_code.token.usage", "unit": "tokens", "sum": {"aggregationTemporality": temporality,
+             "dataPoints": [dp(1000, [a("type", "input")]), dp(500, [a("type", "output")]),
+                            dp(20000, [a("type", "cacheRead")]), dp(0, [a("type", "cacheCreation")])]}},
+            {"name": "claude_code.cost.usage", "unit": "USD", "sum": {"aggregationTemporality": temporality,
+             "dataPoints": [dp(0.0275)]}},
+            {"name": "claude_code.session.count", "sum": {"dataPoints": [dp(1)]}},
+        ]}],
+    }]}
+
+
+def test_claude_code_metrics_become_per_engineer_events(client, api_key):
+    ts = int(datetime.now(UTC).timestamp() * 1e9)
+    h = {"X-API-Key": api_key}
+    r = client.post("/v1/otlp/v1/metrics", json=_claude_code_payload(ts), headers=h).json()
+    assert r["accepted"] == 1 and r["rejected"] == 0
+    assert client.post("/v1/otlp/v1/metrics", json=_claude_code_payload(ts), headers=h).json()["duplicates"] == 1
+
+    ev = client.get("/api/events").json()["items"][0]
+    assert ev["project"] == "claude-code" and ev["team"] == "platform" and ev["feature"] == "claude-code:main"
+    assert ev["input_tokens"] == 1000 and ev["cached_input_tokens"] == 20000 and ev["output_tokens"] == 500
+    # Priced from the registry (opus-4-5 snapshot -> claude-opus-4-5): 1000*5 + 20000*0.5 + 500*25 per 1M
+    assert ev["cost_usd"] == pytest.approx(0.0275)
+    users = client.get("/api/breakdown?dimension=user").json()["items"]
+    assert users[0]["key"] == "dev@example.dev"
+
+
+def test_claude_code_cumulative_metrics_rejected_with_guidance(client, api_key):
+    ts = int(datetime.now(UTC).timestamp() * 1e9)
+    r = client.post("/v1/otlp/v1/metrics", json=_claude_code_payload(ts, temporality=2),
+                    headers={"X-API-Key": api_key}).json()
+    assert r["accepted"] == 0 and "TEMPORALITY_PREFERENCE=delta" in r["errors"][0]["error"]
