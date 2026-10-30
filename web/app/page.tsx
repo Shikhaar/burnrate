@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowRight, Coins, Gauge, Hash } from "lucide-react";
+import { Activity, ArrowRight, Coins, Gauge, Hash, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 import { Donut, TimeseriesArea } from "@/components/charts";
@@ -42,6 +42,8 @@ export default function OverviewPage() {
         title="Overview"
         description={o ? `${day(o.period.start)} – ${day(o.period.end)} · last ${days} days` : `Last ${days} days of AI spend across every provider`}
       />
+
+      {o?.unpriced?.length ? <UnpricedNotice items={o.unpriced} /> : null}
 
       {overview.error && !o ? (
         <Card className="mb-6">
@@ -365,5 +367,30 @@ function ProviderSplit({ overview, days }: { overview: ReturnType<typeof useOver
         </DataState>
       </CardBody>
     </Card>
+  );
+}
+
+function UnpricedNotice({ items }: { items: { provider: string; model: string; requests: number }[] }) {
+  const total = items.reduce((n, i) => n + i.requests, 0);
+  const shown = items.slice(0, 3).map((i) => `${i.provider}/${i.model}`).join(", ");
+  return (
+    <div
+      role="status"
+      className="mb-6 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-fg"
+    >
+      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden />
+      <p>
+        <span className="font-medium">
+          {total.toLocaleString()} {total === 1 ? "request has" : "requests have"} no price
+        </span>{" "}
+        and {total === 1 ? "counts" : "count"} as $0:{" "}
+        <span className="font-mono text-xs">{shown}</span>
+        {items.length > 3 ? ` and ${items.length - 3} more` : ""}. Add them to the price registry, then run{" "}
+        <code className="font-mono text-xs">burnrate pricing</code>.{" "}
+        <Link href="/pricing" className="text-muted underline-offset-2 hover:text-fg hover:underline">
+          View registry
+        </Link>
+      </p>
+    </div>
   );
 }

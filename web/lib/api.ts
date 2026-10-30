@@ -49,6 +49,8 @@ export interface Overview {
   prev_period_cost_usd: number;
   month_to_date_cost_usd: number;
   projected_month_cost_usd: number;
+  /** Requests counted at $0 because their model has no registry price. */
+  unpriced?: { provider: string; model: string; requests: number }[];
   by_provider: ProviderTotal[];
   daily: DailyTotal[];
 }

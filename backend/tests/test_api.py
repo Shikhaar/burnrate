@@ -211,3 +211,11 @@ def test_forecast_ignores_partial_today(client, session):
     # 14 full days ($140) + today's expected $10 + 15 more days ($150) = $300
     assert fc["projected_usd"] == pytest.approx(300, rel=0.01)
     assert fc["low_usd"] <= fc["projected_usd"] <= fc["high_usd"]
+
+
+def test_unpriced_models_are_surfaced(client, api_key):
+    client.post("/v1/events", json={"events": [{"provider": "openai", "model": "gpt-9-turbo", "input_tokens": 5}]},
+                headers={"X-API-Key": api_key})
+    ov = client.get("/api/overview?days=7").json()
+    assert ov["unpriced"] == [{"provider": "openai", "model": "gpt-9-turbo", "requests": 1}]
+    assert client.get("/api/events").json()["items"][0]["pricing"] == "unpriced"

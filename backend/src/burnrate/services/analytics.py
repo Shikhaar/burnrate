@@ -121,6 +121,12 @@ def overview(session: Session, days: int) -> dict:
     from burnrate.services.forecast import forecast_month  # local import avoids a cycle
 
     fc = forecast_month(session)
+    unpriced = session.execute(
+        _in(_base(UsageEvent.provider, UsageEvent.model, REQUESTS), w)
+        .where(EventCost.method == "unpriced")
+        .group_by(UsageEvent.provider, UsageEvent.model)
+        .order_by(REQUESTS.desc())
+    ).all()
     return {
         "period": {"start": w.start.isoformat(), "end": w.end.isoformat()},
         "total_cost_usd": round(total, 4),
@@ -129,6 +135,8 @@ def overview(session: Session, days: int) -> dict:
         "prev_period_cost_usd": round(total_cost(session, w.previous()), 4),
         "month_to_date_cost_usd": fc["month_to_date_usd"],
         "projected_month_cost_usd": fc["projected_usd"],
+        # Requests counted at $0 because their model has no registry price: surfaced, never hidden.
+        "unpriced": [{"provider": p, "model": m, "requests": int(n)} for p, m, n in unpriced],
         "by_provider": [
             {"key": k, "cost_usd": round(float(c), 4), "tokens": int(t), "requests": int(r)}
             for k, c, t, r in by_provider
@@ -208,7 +216,8 @@ def timeseries(session: Session, group_by: str, days: int, top: int = 6) -> dict
 
 def list_events(session: Session, limit: int, offset: int, filters: dict[str, str | None]) -> dict:
     stmt = _apply_filters(
-        select(UsageEvent, EventCost.total_cost_usd).join(EventCost, EventCost.event_id == UsageEvent.id),
+        select(UsageEvent, EventCost.total_cost_usd, EventCost.method)
+        .join(EventCost, EventCost.event_id == UsageEvent.id),
         filters,
     )
     count_stmt = _apply_filters(select(func.count(UsageEvent.id)), filters)
@@ -235,10 +244,11 @@ def list_events(session: Session, limit: int, offset: int, filters: dict[str, st
                 "cached_input_tokens": e.cached_input_tokens,
                 "reasoning_tokens": e.reasoning_tokens,
                 "cost_usd": round(cost, 6),
+                "pricing": method,
                 "latency_ms": e.latency_ms,
                 "status": e.status,
             }
-            for e, cost in rows
+            for e, cost, method in rows
         ],
     }
 

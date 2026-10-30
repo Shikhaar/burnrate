@@ -6,10 +6,10 @@ Common query params: `days` (window length, default 30). Dimension values: `prov
 | Method | Path | Response |
 |---|---|---|
 | GET | `/api/meta` | `{providers[], models[], projects[], features[], teams[], environments[]}` |
-| GET | `/api/overview?days=30` | `{period:{start,end}, total_cost_usd, total_tokens, request_count, prev_period_cost_usd, month_to_date_cost_usd, projected_month_cost_usd, by_provider:[{key,cost_usd,tokens,requests}], daily:[{date,cost_usd,tokens,requests}]}` |
+| GET | `/api/overview?days=30` | `{period:{start,end}, total_cost_usd, total_tokens, request_count, prev_period_cost_usd, month_to_date_cost_usd, projected_month_cost_usd, unpriced:[{provider,model,requests}], by_provider:[{key,cost_usd,tokens,requests}], daily:[{date,cost_usd,tokens,requests}]}` |
 | GET | `/api/breakdown?dimension=model&days=30&limit=10` | `{dimension, items:[{key,cost_usd,tokens,requests,share,change_pct}]}` — `share` 0..1, `change_pct` vs previous equal window (null if no prior data) |
 | GET | `/api/timeseries?group_by=provider&days=30` | `{group_by, series_keys:[...], points:[{date, values:{<key>: cost_usd}}]}` |
-| GET | `/api/events?limit=50&offset=0&provider=&model=&project=` | `{total, items:[{id,timestamp,provider,model,project,feature,team,environment,customer_id,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_usd,latency_ms,status}]}` |
+| GET | `/api/events?limit=50&offset=0&provider=&model=&project=` | `{total, items:[{id,timestamp,provider,model,project,feature,team,environment,customer_id,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_usd,pricing:"priced"|"provider_reported"|"unpriced",latency_ms,status}]}` |
 | GET | `/api/anomalies?days=30` | `{items:[{id,date,dimension,key,cost_usd,baseline_usd,z_score,change_pct,severity:"low"|"medium"|"high",message,related:["<dimension>:<key>"]}]}` — same-day spikes caused by the same money are grouped into one incident under the most specific dimension |
 | GET | `/api/forecast` | `{month, month_to_date_usd, projected_usd, low_usd, high_usd, daily:[{date, actual_usd|null, forecast_usd|null}]}` |
 | GET | `/api/reconciliation?days=30` | `{tolerance_pct, items:[{provider,estimated_usd,billed_usd,delta_usd,delta_pct,status:"ok"|"investigate"|"no_billing_data"}], daily:[{date,provider,estimated_usd,billed_usd|null}]}` — numeric item fields are null when status is `no_billing_data`; totals only cover days the provider has billed |
