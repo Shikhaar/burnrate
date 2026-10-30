@@ -68,10 +68,47 @@ def detect(session: Session, days: int = 30, dimensions: tuple[str, ...] = WATCH
                             "severity": _severity(z, change),
                             "message": f"{dim.capitalize()} '{key}' spent ${value:,.2f} on {d.isoformat()}, "
                             f"{change:+.0f}% vs its {BASELINE_DAYS}-day median of ${med:,.2f}.",
+                            "related": [],
                         }
                     )
 
+    incidents = group_incidents(found)
     order = {"high": 0, "medium": 1, "low": 2}
-    found.sort(key=lambda a: (a["date"], -order[a["severity"]], a["cost_usd"]), reverse=True)
-    return found
+    incidents.sort(key=lambda a: (a["date"], -order[a["severity"]], a["cost_usd"]), reverse=True)
+    return incidents
+
+
+# Most specific first: a feature spike explains its model and project spikes, not the reverse.
+SPECIFICITY = {"feature": 0, "model": 1, "project": 2, "customer": 3}
+SAME_INCIDENT_TOLERANCE = 0.25
+
+
+def group_incidents(anomalies: list[dict]) -> list[dict]:
+    """Collapse same-day anomalies whose excess spend is the same money seen through different dimensions.
+
+    One retry loop shows up as a feature, a model and a project spike; we report it once, under the most
+    specific dimension, listing the others as `related`.
+    """
+    by_day: dict[str, list[dict]] = {}
+    for a in anomalies:
+        by_day.setdefault(a["date"], []).append(a)
+
+    kept: list[dict] = []
+    for day_items in by_day.values():
+        day_items.sort(key=lambda a: SPECIFICITY.get(a["dimension"], 9))
+        primaries: list[dict] = []
+        for a in day_items:
+            excess = a["cost_usd"] - a["baseline_usd"]
+            owner = next(
+                (p for p in primaries
+                 if p["dimension"] != a["dimension"]
+                 and abs((p["cost_usd"] - p["baseline_usd"]) - excess) <= SAME_INCIDENT_TOLERANCE * excess),
+                None,
+            )
+            if owner:
+                owner["related"].append(f"{a['dimension']}:{a['key']}")
+            else:
+                primaries.append(a)
+        kept.extend(primaries)
+    return kept
 

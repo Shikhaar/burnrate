@@ -1,0 +1,24 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/shikhar/Projects/burnrate/backend && exec .venv/bin/uvicorn burnrate.main:app --port 8000"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--dir",
+        "/Users/shikhar/Projects/burnrate/web",
+        "dev"
+      ],
+      "port": 3000
+    }
+  ]
+}

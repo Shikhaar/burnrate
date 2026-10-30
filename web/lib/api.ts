@@ -120,6 +120,8 @@ export interface Anomaly {
   change_pct: number | null;
   severity: Severity;
   message: string;
+  /** Other dimensions showing the same excess spend ("model:claude-sonnet-4-5"). */
+  related?: string[];
 }
 
 export interface AnomaliesResponse {

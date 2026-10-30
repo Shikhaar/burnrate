@@ -54,3 +54,22 @@ def test_missing_cache_rate_bills_cached_tokens_at_input_rate():
     no_cache = {**GPT4O, "cached_input_per_mtok": None}
     c = compute_cost(ev(cached_input_tokens=1_000_000), book(no_cache))
     assert c.cached_input_cost_usd == pytest.approx(2.5)
+
+
+def test_same_money_across_dimensions_is_one_incident():
+    from burnrate.services.anomalies import group_incidents
+
+    def a(dim, key, cost, base, date="2026-10-29"):
+        return {"date": date, "dimension": dim, "key": key, "cost_usd": cost, "baseline_usd": base, "related": []}
+
+    out = group_incidents([
+        a("project", "support", 65, 27),     # +38 — same excess as the feature
+        a("model", "sonnet", 58, 20),        # +38
+        a("feature", "triage", 58, 20),      # +38 -> primary (most specific)
+        a("model", "gpt-5", 90, 30),         # +60 — a different incident
+        a("feature", "triage", 58, 20, date="2026-10-28"),
+    ])
+    primary = next(i for i in out if i["key"] == "triage" and i["date"] == "2026-10-29")
+    assert sorted(primary["related"]) == ["model:sonnet", "project:support"]
+    assert {(i["dimension"], i["key"], i["date"]) for i in out} == {
+        ("feature", "triage", "2026-10-29"), ("model", "gpt-5", "2026-10-29"), ("feature", "triage", "2026-10-28")}

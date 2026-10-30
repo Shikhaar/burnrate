@@ -95,9 +95,10 @@ export default function OverviewPage() {
         <TopTable dimension="model" title="Top models" days={days} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <LatestAnomalies days={days} />
         <BudgetSummary />
+        <CodingAgents days={days} />
       </div>
     </>
   );
@@ -171,6 +172,49 @@ function TopTable({ dimension, title, days }: { dimension: Dimension; title: str
   );
 }
 
+function CodingAgents({ days }: { days: number }) {
+  const q = useBreakdown("user", days, 50);
+  const users = (q.data?.items ?? []).filter((u) => u.key !== "(unattributed)");
+  const total = users.reduce((s, u) => s + u.cost_usd, 0);
+  return (
+    <Card>
+      <CardHeader
+        title="Coding agents"
+        description={q.data ? `${usd(total)} across ${users.filter((u) => !isOther(u.key)).length} engineers` : "Spend by engineer"}
+        actions={
+          <Link href={`/explore?dim=user${days !== 30 ? `&days=${days}` : ""}`} className="flex items-center gap-1 text-xs text-muted hover:text-fg">
+            Explore <ArrowRight className="size-3" aria-hidden />
+          </Link>
+        }
+      />
+      <CardBody>
+        <DataState
+          query={q}
+          loading={<TableSkeleton rows={5} cols={2} />}
+          isEmpty={() => users.length === 0}
+          empty={<EmptyState title="No coding-agent usage" description="Engineer-attributed usage (e.g. Claude Code) appears here." />}
+        >
+          {() => (
+            <ul className="space-y-3">
+              {users.slice(0, 6).map((u) => (
+                <li key={u.key}>
+                  <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                    <span className={isOther(u.key) ? "text-muted" : "truncate font-mono text-[12px] text-fg"}>{isOther(u.key) ? "Other" : u.key}</span>
+                    <span className="tnum shrink-0 text-fg">
+                      {usd(u.cost_usd)} <Delta value={isOther(u.key) ? null : u.change_pct} className="ml-1" />
+                    </span>
+                  </div>
+                  <ShareBar value={total ? u.cost_usd / total : 0} color="var(--series-2)" />
+                </li>
+              ))}
+            </ul>
+          )}
+        </DataState>
+      </CardBody>
+    </Card>
+  );
+}
+
 function LatestAnomalies({ days }: { days: number }) {
   const q = useAnomalies(days);
   return (
@@ -201,6 +245,7 @@ function LatestAnomalies({ days }: { days: number }) {
                     <p className="text-sm text-fg">{a.message}</p>
                     <p className="mt-0.5 text-xs text-muted">
                       {day(a.date)} · {a.dimension}: <span className="font-mono">{a.key}</span>
+                      {a.related?.length ? <> · also {a.related.join(", ")}</> : null}
                     </p>
                   </div>
                   <div className="text-right">

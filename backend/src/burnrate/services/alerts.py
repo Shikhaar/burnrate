@@ -46,7 +46,8 @@ def _candidates(session: Session) -> list[Alert]:
     for a in anomalies.detect(session, days=ANOMALY_LOOKBACK_DAYS):
         if a["severity"] in NOTIFY_ANOMALY_SEVERITIES:
             out.append(Alert(dedupe_key=f"anomaly:{a['id']}", kind="anomaly", severity=a["severity"],
-                             title=f"Spend spike: {a['dimension']} {a['key']}", detail=a["message"]))
+                             title=f"Spend spike: {a['dimension']} {a['key']}",
+                             detail=a["message"] + (f" Related: {', '.join(a['related'])}." if a["related"] else "")))
     return out
 
 

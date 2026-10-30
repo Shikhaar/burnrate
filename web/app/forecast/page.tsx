@@ -286,7 +286,12 @@ function AnomaliesTable({ days }: { days: number }) {
                         <span className="text-xs text-subtle">{a.dimension}</span>
                         <span className="ml-1.5 font-mono text-[12px] text-fg">{a.key}</span>
                       </Td>
-                      <Td className="hidden min-w-72 whitespace-normal! text-fg-2 lg:table-cell">{a.message}</Td>
+                      <Td className="hidden min-w-72 whitespace-normal! text-fg-2 lg:table-cell">
+                        {a.message}
+                        {a.related?.length ? (
+                          <span className="mt-1 block text-xs text-muted">Same incident: {a.related.join(", ")}</span>
+                        ) : null}
+                      </Td>
                       <Td align="right" className="font-medium text-fg">
                         {usd(a.cost_usd)}
                       </Td>

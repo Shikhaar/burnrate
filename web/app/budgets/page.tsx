@@ -1,12 +1,12 @@
 "use client";
 
 import clsx from "clsx";
-import { Plus, Trash2, Wallet, X } from "lucide-react";
+import { Activity, BellRing, Plus, Trash2, Wallet, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { BudgetStatusBadge, budgetColor } from "@/components/severity";
-import { Button, Card, DataState, EmptyState, PageHeader, Skeleton } from "@/components/ui";
-import { ApiError, createBudget, deleteBudget, DIMENSIONS, useBudgets, useMeta, type Budget, type Dimension, type Meta } from "@/lib/api";
-import { monthLabel, share, usd, usdCompact } from "@/lib/format";
+import { BudgetStatusBadge, budgetColor, SeverityBadge } from "@/components/severity";
+import { Button, Card, CardBody, CardHeader, DataState, EmptyState, PageHeader, Skeleton, TableSkeleton } from "@/components/ui";
+import { ApiError, createBudget, deleteBudget, DIMENSIONS, evaluateAlerts, useAlerts, useBudgets, useMeta, type Budget, type Dimension, type Meta } from "@/lib/api";
+import { monthLabel, share, timestamp, usd, usdCompact } from "@/lib/format";
 
 const META_KEY: Partial<Record<Dimension, keyof Meta>> = {
   provider: "providers",
@@ -89,8 +89,93 @@ export default function BudgetsPage() {
           </div>
         )}
       </DataState>
+
+      <AlertHistory onEvaluated={() => void budgets.mutate()} />
     </>
   );
+}
+
+function AlertHistory({ onEvaluated }: { onEvaluated: () => void }) {
+  const q = useAlerts(30);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const evaluate = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await evaluateAlerts();
+      setMsg(r.fired ? `${r.fired} new alert${r.fired === 1 ? "" : "s"} fired` : "No new alerts");
+      await q.mutate();
+      onEvaluated();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Evaluation failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card className="mt-6">
+      <CardHeader
+        title="Alert history"
+        description="Budget and anomaly alerts from the last 30 days"
+        actions={
+          <>
+            {msg ? <span className="text-xs text-muted">{msg}</span> : null}
+            <Button size="sm" onClick={evaluate} disabled={busy}>
+              <BellRing className="size-3.5" aria-hidden /> {busy ? "Evaluating…" : "Evaluate now"}
+            </Button>
+          </>
+        }
+      />
+      <CardBody>
+        <DataState
+          query={q}
+          loading={<TableSkeleton rows={4} cols={4} />}
+          isEmpty={(d) => d.items.length === 0}
+          empty={<EmptyState icon={<BellRing className="size-5" aria-hidden />} title="No alerts fired" description="Alerts fire when a budget crosses its threshold or an anomaly is detected." />}
+        >
+          {(d) => (
+            <ul className="divide-y divide-border">
+              {d.items.map((a) => (
+                <li key={a.id} className="flex items-start gap-3 py-2.5 first:pt-0 last:pb-0">
+                  <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-surface-2 text-fg-2">
+                    {a.kind === "budget" ? <Wallet className="size-3.5" aria-hidden /> : <Activity className="size-3.5" aria-hidden />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-fg">{a.title}</p>
+                      <AlertSeverity severity={a.severity} />
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted">{a.detail}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="tnum text-xs text-muted">{timestamp(a.created_at)}</p>
+                    <p className="mt-0.5 text-[11px]">
+                      {a.delivered ? (
+                        <span className="text-ok">Delivered</span>
+                      ) : a.delivery_error ? (
+                        <span className="text-bad" title={a.delivery_error}>
+                          Delivery failed
+                        </span>
+                      ) : (
+                        <span className="text-subtle">Not delivered</span>
+                      )}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </DataState>
+      </CardBody>
+    </Card>
+  );
+}
+
+function AlertSeverity({ severity }: { severity: string }) {
+  if (["high", "critical", "exceeded"].includes(severity)) return <SeverityBadge severity="high" />;
+  if (["medium", "warning"].includes(severity)) return <SeverityBadge severity="medium" />;
+  return <SeverityBadge severity="low" />;
 }
 
 function BudgetCard({ budget: b, onDeleted }: { budget: Budget; onDeleted: () => void }) {
