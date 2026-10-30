@@ -346,7 +346,7 @@ function BudgetForm({ onCreated }: { onCreated: () => Promise<void> | void }) {
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Field label="Name">
-            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Search team" autoFocus />
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Search team" maxLength={120} autoFocus />
           </Field>
           <Field label="Scope">
             <select
