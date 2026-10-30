@@ -33,6 +33,10 @@ existing OpenTelemetry pipeline at `/v1/otlp/v1/traces`. Nothing sits in the inf
 path, so a Burnrate outage can never take down the product. The SDK queues in memory, flushes on
 a background thread with retry/backoff, and swallows its own errors.
 
+**Bounded, traceable API.** Ingestion is rate-limited per API key, so one runaway integration can't starve
+the rest, and the dashboard API is limited per client IP. Every request gets an `X-Request-ID` that appears on
+every log line written while handling it, and logs can be emitted as JSON for any log pipeline.
+
 **Idempotent ingestion.** `request_id` carries a unique constraint, and SDK retries or replayed OTel
 batches are counted as duplicates, so they are never double-billed.
 

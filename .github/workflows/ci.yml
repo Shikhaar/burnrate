@@ -113,3 +113,41 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm build
+
+  docker:
+    # Builds every image and runs the full stack exactly as the README's Docker quickstart does.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start (waits for health checks)
+        run: docker compose up -d --build --wait --wait-timeout 300
+      - name: Seed demo data
+        run: docker compose run --rm seed
+      - name: Smoke test the running stack
+        run: |
+          set -euo pipefail
+          curl -fsS localhost:8000/healthz
+          test "$(curl -fsS 'localhost:8000/api/overview?days=30' | jq '.total_cost_usd > 0')" = true
+          test "$(curl -fsS localhost:8000/api/anomalies | jq '.items | length > 0')" = true
+
+          # Live ingestion through the API container, against Postgres.
+          KEY=$(docker compose exec -T api burnrate create-key ci 2>/dev/null | tail -n1)
+          EVENT='{"events":[{"provider":"openai","model":"gpt-4o","input_tokens":1000,"request_id":"docker-ci-1"}]}'
+          curl -fsS -X POST localhost:8000/v1/events -H "X-API-Key: $KEY" -H 'content-type: application/json' -d "$EVENT" | tee /dev/stderr | jq -e '.accepted == 1'
+          curl -fsS -X POST localhost:8000/v1/events -H "X-API-Key: $KEY" -H 'content-type: application/json' -d "$EVENT" | jq -e '.duplicates == 1'
+
+          # Every dashboard route serves from the production build.
+          for path in / /explore /requests /budgets /forecast /reconciliation /insights /pricing; do
+            curl -fsS -o /dev/null -w "web $path %{http_code}\n" "localhost:3000$path"
+          done
+          curl -fsS localhost:3000 | grep -q Burnrate
+
+          # API logs are structured JSON.
+          docker compose logs api --no-log-prefix | grep '"logger": "burnrate.http"' | tail -n1 | jq -e '.request_id and .status'
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

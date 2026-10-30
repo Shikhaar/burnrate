@@ -45,7 +45,7 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Alerts** | Budget and anomaly alerts sent to Slack or any webhook. Deduplicated, so each condition notifies once (`burnrate alerts` from cron). |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
 | **Ingestion** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution), an OTLP/HTTP receiver for OpenTelemetry GenAI spans, and a receiver for Claude Code's telemetry. Nothing sits in your request path. |
-| **Engineering** | Idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, Alembic migrations, health checks, and CI against both SQLite and Postgres. |
+| **Engineering** | Idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, per-key and per-IP rate limiting, structured JSON logs with request IDs, Alembic migrations, health checks, and CI that runs against SQLite, Postgres and the full Docker stack. |
 
 ## Screenshots
 
@@ -83,7 +83,7 @@ docker compose run --rm seed        # demo data
 open http://localhost:3000
 ```
 
-> The Compose setup hasn't yet been run end to end. CI builds and tests each service separately.
+> CI builds these images and runs this exact stack on every push, including seeding, live ingestion and loading every dashboard page.
 
 ## Send real usage
 
@@ -159,7 +159,7 @@ burnrate sync all --days 31
 
 ## Tech
 
-**Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Pydantic v2, PostgreSQL / SQLite, httpx · **Dashboard:** Next.js 15, TypeScript, Tailwind CSS v4, Recharts · **Infra:** Docker Compose, GitHub Actions (backend on SQLite + Postgres matrix, SDKs on Python 3.10 & 3.13 and Node 22, web lint + build)
+**Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Pydantic v2, PostgreSQL / SQLite, httpx · **Dashboard:** Next.js 15, TypeScript, Tailwind CSS v4, Recharts · **Infra:** Docker Compose, GitHub Actions (backend on SQLite + Postgres, SDKs on Python 3.10 & 3.13 and Node 22, web lint + build, full Docker stack boot)
 
 ```
 backend/         FastAPI service, pricing engine, analytics, connectors, CLI, tests
@@ -174,8 +174,8 @@ docs/            architecture, event schema, API contract, deployment, demo scri
 
 Burnrate is a complete, tested reference implementation, not yet a hosted service:
 
-- **Verified:** 36 backend tests and SDK tests in both languages. CI runs ingestion against real Postgres, and the full dashboard has been checked against live data.
-- **Not yet built:** user accounts and multi-tenant organizations (the dashboard API is protected by a single optional token), rate limiting, structured logging and metrics, and a built-in scheduler for alerts and billing sync (use cron; see [deploy.md](docs/deploy.md)).
+- **Verified:** 42 backend tests and SDK tests in both languages. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
+- **Not yet built:** user accounts and multi-tenant organizations (the dashboard API is protected by a single optional token), metrics and tracing, a shared rate-limit store for multiple API replicas (limits are per process today), and a built-in scheduler for alerts and billing sync (use cron; see [deploy.md](docs/deploy.md)).
 - **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing connector is tested against sample responses, not yet against the live API.
 
 ## Roadmap
@@ -185,7 +185,7 @@ Burnrate is a complete, tested reference implementation, not yet a hosted servic
 - Email alerts and per-team routing
 - User accounts, multi-tenant orgs, SSO and role-based access control
 - Hosted demo
-- Rate limiting, structured logs and metrics
+- Prometheus metrics and a Redis-backed rate-limit store for multiple replicas
 - ClickHouse rollups for very high event volumes
 
 ## License
