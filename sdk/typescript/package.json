@@ -1,0 +1,19 @@
+{
+  "name": "@burnrate/sdk",
+  "version": "0.1.0",
+  "description": "Report LLM token usage and cost attribution to Burnrate. Zero runtime dependencies.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

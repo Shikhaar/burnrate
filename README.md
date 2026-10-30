@@ -39,7 +39,7 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Anomaly detection** | Robust z-score (median/MAD) per project, feature and model, with severity and plain-English explanations. |
 | **Budgets** | Monthly limits company-wide or per project, team, feature or customer, with projected-overrun warnings. |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
-| **Two ingestion paths** | Zero-dependency Python SDK (async batching, retries, context attribution) **or** OTLP/HTTP with OpenTelemetry GenAI semantic conventions. |
+| **Two ingestion paths** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution) **or** OTLP/HTTP using OpenTelemetry GenAI semantic conventions. |
 | **Production basics** | Hashed API keys, idempotent ingestion, optional dashboard token, health checks, Docker, CI on SQLite + Postgres. |
 
 ## Quickstart
@@ -83,6 +83,15 @@ with br.attribute(feature="ticket-triage", customer_id="acme"):
 
 The SDK only sends token counts and metadata, never prompts or completions. If Burnrate is unreachable, your app keeps running and the SDK logs a warning.
 
+**TypeScript SDK**
+
+```ts
+import { Burnrate } from "@burnrate/sdk";
+const br = new Burnrate({ apiKey: process.env.BURNRATE_API_KEY, project: "rag-search" });
+const res = await openai.chat.completions.create({ model: "gpt-4.1", messages });
+br.trackOpenAI(res, { feature: "answer-synthesis", customer_id: "acme" });
+```
+
 **OpenTelemetry:** point any OTLP/HTTP JSON exporter at `POST /v1/otlp/v1/traces` with the `X-API-Key` header. Spans carrying `gen_ai.*` attributes become usage events. Add `burnrate.feature`, `burnrate.team` and `burnrate.customer_id` for attribution.
 
 **Raw HTTP**
@@ -112,18 +121,19 @@ burnrate sync all --days 31
 
 ## Tech
 
-**Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Pydantic v2, PostgreSQL / SQLite, httpx · **Dashboard:** Next.js 15, TypeScript, Tailwind CSS v4, Recharts · **Infra:** Docker Compose, GitHub Actions (backend on SQLite + Postgres matrix, SDK on Python 3.10 & 3.13, web lint + build)
+**Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Pydantic v2, PostgreSQL / SQLite, httpx · **Dashboard:** Next.js 15, TypeScript, Tailwind CSS v4, Recharts · **Infra:** Docker Compose, GitHub Actions (backend on SQLite + Postgres matrix, SDKs on Python 3.10 & 3.13 and Node 22, web lint + build)
 
 ```
 backend/     FastAPI service, pricing engine, analytics, connectors, CLI, tests
 web/         Next.js dashboard
-sdk/python/  zero-dependency Python SDK
+sdk/python/      zero-dependency Python SDK
+sdk/typescript/  zero-dependency TypeScript SDK
 docs/        architecture, event schema, API contract
 ```
 
 ## Roadmap
 
-- TypeScript SDK and LangChain / LlamaIndex / Vercel AI SDK callbacks
+- LangChain / LlamaIndex / Vercel AI SDK callbacks
 - Coding-agent spend (Claude Code, Cursor) via admin and analytics APIs
 - Slack/email alerts for budgets and anomalies
 - Multi-tenant orgs with SSO and role-based access control
