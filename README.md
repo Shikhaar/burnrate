@@ -42,10 +42,10 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Anomaly detection** | Robust z-score (median/MAD) per project, feature and model. When one problem shows up as several spikes (the same retry loop as a feature, model and project spike), it's reported as one incident. |
 | **Budgets** | Monthly limits company-wide or per project, team, feature or customer, with projected-overrun warnings. |
 | **Coding-agent spend** | Point Claude Code's built-in OpenTelemetry export at Burnrate to see coding-agent spend per engineer, model and session next to production spend. |
-| **Alerts** | Budget and anomaly alerts sent to Slack or any webhook. Deduplicated, so each condition notifies once (`burnrate alerts` from cron). |
+| **Alerts** | Budget and anomaly alerts sent to Slack or any webhook. Deduplicated even when evaluated concurrently, and failed deliveries are retried with backoff (`burnrate alerts` from cron). |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
 | **Ingestion** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution), an OTLP/HTTP receiver for OpenTelemetry GenAI spans, and a receiver for Claude Code's telemetry. Nothing sits in your request path. |
-| **Engineering** | Idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, per-key and per-IP rate limiting, structured JSON logs with request IDs, Alembic migrations, health checks, and CI that runs against SQLite, Postgres and the full Docker stack. |
+| **Engineering** | Idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, per-key and per-IP rate limiting (shared across replicas via Redis), structured JSON logs with request IDs, Prometheus metrics, Alembic migrations, health checks, and CI that runs against SQLite, Postgres and the full Docker stack. |
 
 ## Screenshots
 
@@ -174,8 +174,8 @@ docs/            architecture, event schema, API contract, deployment, demo scri
 
 Burnrate is a complete, tested reference implementation, not yet a hosted service:
 
-- **Verified:** 42 backend tests and SDK tests in both languages. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
-- **Not yet built:** user accounts and multi-tenant organizations (the dashboard API is protected by a single optional token), metrics and tracing, a shared rate-limit store for multiple API replicas (limits are per process today), and a built-in scheduler for alerts and billing sync (use cron; see [deploy.md](docs/deploy.md)).
+- **Verified:** 53 backend tests and SDK tests in both languages. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
+- **Not yet built:** user accounts and multi-tenant organizations (the dashboard API is protected by a single optional token), distributed tracing, and a built-in scheduler for alerts and billing sync (use cron; see [deploy.md](docs/deploy.md)).
 - **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing connector is tested against sample responses, not yet against the live API.
 
 ## Roadmap
@@ -185,7 +185,7 @@ Burnrate is a complete, tested reference implementation, not yet a hosted servic
 - Email alerts and per-team routing
 - User accounts, multi-tenant orgs, SSO and role-based access control
 - Hosted demo
-- Prometheus metrics and a Redis-backed rate-limit store for multiple replicas
+- OpenTelemetry tracing for Burnrate itself
 - ClickHouse rollups for very high event volumes
 
 ## License
