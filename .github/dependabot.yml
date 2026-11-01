@@ -20,6 +20,10 @@ updates:
     directory: /sdk/typescript
     schedule:
       interval: weekly
+    ignore:
+      # @types/node tracks the oldest Node the SDK supports (engines >=18), not the newest.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -30,6 +34,10 @@ updates:
     directory: /backend
     schedule:
       interval: weekly
+    ignore:
+      # Move to a new Python only once its wheels ecosystem has caught up (revisit 3.15 in 2027).
+      - dependency-name: python
+        versions: [">=3.15"]
 
   - package-ecosystem: docker
     directory: /web
