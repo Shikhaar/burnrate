@@ -1,9 +1,10 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from sqlalchemy import insert, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from burnrate.db import insert_ignoring_conflicts
 from burnrate.metrics import EVENTS_INGESTED
 from burnrate.models import UsageEvent
 from burnrate.pricing import PriceBook, compute_cost, to_event_cost
@@ -15,18 +16,6 @@ _PRICED_COLUMNS = (
     UsageEvent.cached_input_tokens, UsageEvent.cache_write_tokens, UsageEvent.output_tokens,
     UsageEvent.provider_reported_cost_usd,
 )
-
-
-def _insert_ignoring_duplicates(session: Session):
-    """INSERT ... ON CONFLICT (request_id) DO NOTHING, so concurrent batches can't fail each other."""
-    dialect = session.get_bind().dialect.name
-    if dialect == "postgresql":
-        from sqlalchemy.dialects.postgresql import insert as dialect_insert
-    elif dialect == "sqlite":
-        from sqlalchemy.dialects.sqlite import insert as dialect_insert
-    else:  # pragma: no cover - other databases fall back to the pre-check only
-        return insert(UsageEvent)
-    return dialect_insert(UsageEvent).on_conflict_do_nothing(index_elements=["request_id"])
 
 
 def ingest_events(session: Session, events: list[EventIn], book: PriceBook | None = None) -> IngestResult:
@@ -52,7 +41,7 @@ def ingest_events(session: Session, events: list[EventIn], book: PriceBook | Non
 
     inserted = []
     if rows:
-        stmt = _insert_ignoring_duplicates(session).returning(*_PRICED_COLUMNS)
+        stmt = insert_ignoring_conflicts(session, UsageEvent, ["request_id"]).returning(*_PRICED_COLUMNS)
         inserted = session.execute(stmt, rows).all()
     costs = [to_event_cost(r, compute_cost(r, book)) for r in (SimpleNamespace(**row._mapping) for row in inserted)]
     if costs:

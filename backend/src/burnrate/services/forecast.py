@@ -28,15 +28,16 @@ def _linear_fit(xs: list[float], ys: list[float]) -> tuple[float, float]:
     return slope, my - slope * mx
 
 
-def forecast_month(session: Session, on: date | None = None) -> dict:
+def forecast_month(session: Session, on: date | None = None, filters: dict | None = None) -> dict:
+    """Month-end forecast, optionally for a slice of spend (e.g. {"project": "search"}) as budgets need."""
     on = on or today()
     month_start = on.replace(day=1)
     month_end = month_start + timedelta(days=days_in_month(on) - 1)
 
     # Train on complete days only: today is partial and would bias the trend downward.
     history_w = Window(on - timedelta(days=LOOKBACK_DAYS), on - timedelta(days=1))
-    history = daily_totals(session, history_w)
-    month = daily_totals(session, Window(month_start, on))
+    history = daily_totals(session, history_w, filters)
+    month = daily_totals(session, Window(month_start, on), filters)
     mtd = sum(v[0] for v in month.values())
 
     ys = [history.get(d, (0.0, 0, 0))[0] for d in history_w.dates()]

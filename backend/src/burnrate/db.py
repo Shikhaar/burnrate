@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -32,6 +32,18 @@ def make_engine(url: str) -> Engine:
 
 engine = make_engine(get_settings().database_url)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+def insert_ignoring_conflicts(session: Session, model, index_elements: list[str]):
+    """INSERT ... ON CONFLICT (cols) DO NOTHING, so concurrent writers can't fail each other on a unique key."""
+    dialect = session.get_bind().dialect.name
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    elif dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    else:  # pragma: no cover - other databases rely on the caller's pre-check only
+        return insert(model)
+    return dialect_insert(model).on_conflict_do_nothing(index_elements=index_elements)
 
 
 def init_db(bind: Engine | None = None) -> None:

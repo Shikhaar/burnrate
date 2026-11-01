@@ -2,14 +2,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from burnrate.models import Budget
-from burnrate.services.analytics import month_window, naive_projection, total_cost
+from burnrate.services.analytics import month_window, total_cost
+from burnrate.services.forecast import forecast_month
 
 
 def evaluate(session: Session, budget: Budget) -> dict:
     w = month_window()
     filters = {budget.scope_dimension: budget.scope_value} if budget.scope_dimension else {}
     spent = total_cost(session, w, filters)
-    projected = naive_projection(spent, w.end)
+    # Same model as the forecast page, so a budget and the forecast never disagree about month end.
+    projected = forecast_month(session, on=w.end, filters=filters)["projected_usd"]
     utilization = spent / budget.monthly_limit_usd
     if utilization >= 1:
         status = "exceeded"

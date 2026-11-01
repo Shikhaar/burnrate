@@ -102,11 +102,6 @@ def days_in_month(on: date) -> int:
     return calendar.monthrange(on.year, on.month)[1]
 
 
-def naive_projection(spent: float, on: date) -> float:
-    elapsed = on.day
-    return spent / elapsed * days_in_month(on) if elapsed else spent
-
-
 def overview(session: Session, days: int) -> dict:
     w = Window.last(days)
     daily = daily_totals(session, w)
