@@ -143,6 +143,11 @@ jobs:
           done
           curl -fsS localhost:3000 | grep -q Burnrate
 
+          # Prometheus metrics are served, and rate-limit buckets live in the shared Redis.
+          curl -fsS localhost:8000/metrics | grep -q 'burnrate_http_requests_total{method="GET",route="/api/overview"'
+          curl -fsS localhost:8000/metrics | grep -q 'burnrate_events_ingested_total{outcome="accepted"}'
+          test -n "$(docker compose exec -T redis redis-cli --scan --pattern 'burnrate:rl:*' | head -n1)"
+
           # API logs are structured JSON.
           docker compose logs api --no-log-prefix | grep '"logger": "burnrate.http"' | tail -n1 | jq -e '.request_id and .status'
       - name: Show logs on failure

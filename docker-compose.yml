@@ -12,16 +12,28 @@ services:
       interval: 5s
       retries: 10
 
+  # Shared rate-limit state, so limits hold across API replicas (`docker compose up --scale api=3`
+  # behind a load balancer).
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
   api:
     build: ./backend
     environment:
       BURNRATE_DATABASE_URL: postgresql+psycopg://burnrate:burnrate@db:5432/burnrate
+      BURNRATE_REDIS_URL: redis://redis:6379/0
       BURNRATE_CORS_ORIGINS: '["http://localhost:3000"]'
       BURNRATE_LOG_FORMAT: json
     ports:
       - "8000:8000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # One-shot: loads 90 days of demo data. `docker compose run --rm seed`

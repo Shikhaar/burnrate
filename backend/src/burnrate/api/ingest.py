@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from burnrate.config import get_settings
 from burnrate.db import get_session
+from burnrate.metrics import EVENTS_INGESTED
 from burnrate.otel import metrics_to_events, spans_to_events
 from burnrate.schemas import EventBatchIn, IngestResult
 from burnrate.security import require_ingest_key
@@ -28,6 +29,7 @@ def post_otlp_traces(payload: dict, session: Session = Depends(get_session)) -> 
     result = ingest_events(session, events) if events else IngestResult(accepted=0, duplicates=0, rejected=0)
     result.rejected = len(errors)
     result.errors = errors
+    EVENTS_INGESTED.labels("rejected").inc(len(errors))
     return result
 
 
@@ -38,4 +40,5 @@ def post_otlp_metrics(payload: dict, session: Session = Depends(get_session)) ->
     result = ingest_events(session, events) if events else IngestResult(accepted=0, duplicates=0, rejected=0)
     result.rejected = len(errors)
     result.errors = errors
+    EVENTS_INGESTED.labels("rejected").inc(len(errors))
     return result

@@ -19,10 +19,12 @@ dependencies = [
   "pyyaml>=6.0.3",
   "psycopg[binary]>=3.3.6",
   "alembic>=1.20.1",
+  "prometheus-client>=0.21",
+  "redis>=5",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.2.0", "ruff>=0.17.3"]
+dev = ["pytest>=9.2.0", "ruff>=0.17.3", "fakeredis[lua]>=2.26"]
 
 [project.scripts]
 burnrate = "burnrate.cli:main"

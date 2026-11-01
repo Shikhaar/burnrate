@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
+from burnrate.metrics import EVENTS_INGESTED
 from burnrate.models import UsageEvent
 from burnrate.pricing import PriceBook, compute_cost, to_event_cost
 from burnrate.schemas import EventIn, IngestResult
@@ -57,5 +58,7 @@ def ingest_events(session: Session, events: list[EventIn], book: PriceBook | Non
     if costs:
         session.add_all(costs)
     session.commit()
+    EVENTS_INGESTED.labels("accepted").inc(len(inserted))
+    EVENTS_INGESTED.labels("duplicate").inc(len(events) - len(inserted))
     return IngestResult(accepted=len(inserted), duplicates=len(events) - len(inserted), rejected=0)
 

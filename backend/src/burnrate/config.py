@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # Token-bucket limits (requests/minute, also the burst size). 0 disables.
     ingest_rate_limit_per_minute: int = 1200  # per ingest API key (SDKs batch, so this is generous)
     api_rate_limit_per_minute: int = 600  # per client IP on the dashboard API
+    # Share rate limits across API replicas, e.g. redis://redis:6379/0. Empty = per-process limits.
+    redis_url: str = ""
 
     # Slack-compatible incoming webhook for budget/anomaly alerts (POST {"text": ...}).
     alert_webhook_url: str = ""

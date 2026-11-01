@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
 from burnrate import __version__
@@ -11,6 +12,7 @@ from burnrate.db import SessionLocal, engine, init_db
 from burnrate.observability import REQUEST_ID_HEADER, RequestContextMiddleware, configure_logging
 from burnrate.pricing import sync_registry
 from burnrate.ratelimit import RateLimitMiddleware
+from burnrate.security import require_dashboard_token
 
 
 @asynccontextmanager
@@ -32,10 +34,16 @@ def create_app() -> FastAPI:
     )
     # Starlette runs the last-added middleware first: request context wraps everything, so even
     # rate-limited (429) and CORS-rejected requests are logged with their request id.
+    redis_client = None
+    if settings.redis_url:
+        import redis.asyncio as redis
+
+        redis_client = redis.from_url(settings.redis_url, socket_timeout=0.25, socket_connect_timeout=0.25)
     app.add_middleware(
         RateLimitMiddleware,
         ingest_per_minute=settings.ingest_rate_limit_per_minute,
         api_per_minute=settings.api_rate_limit_per_minute,
+        redis_client=redis_client,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -47,6 +55,10 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     app.include_router(ingest.router)
     app.include_router(dashboard.router)
+
+    @app.get("/metrics", tags=["ops"], include_in_schema=False, dependencies=[Depends(require_dashboard_token)])
+    def metrics() -> Response:
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/healthz", tags=["ops"])
     def healthz() -> dict:

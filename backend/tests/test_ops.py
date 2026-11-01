@@ -106,3 +106,103 @@ def test_request_id_is_propagated_and_logged_as_json(caplog):
     access = [json.loads(fmt.format(rec)) for rec in caplog.records if rec.getMessage() == "request"]
     assert {"method", "path", "status", "duration_ms"} <= set(access[0])
     assert access[0]["path"] == "/thing" and access[0]["status"] == 200 and access[0]["request_id"] == "abc123"
+
+
+def _metric(text: str, name: str, **labels) -> float:
+    """Value of one sample from Prometheus text output (0 if absent)."""
+    for line in text.splitlines():
+        if line.startswith(f"{name}{{") and all(f'{k}="{v}"' in line for k, v in labels.items()):
+            return float(line.rsplit(" ", 1)[1])
+        if not labels and line.startswith(f"{name} "):
+            return float(line.rsplit(" ", 1)[1])
+    return 0.0
+
+
+def test_metrics_endpoint_counts_requests_by_route_template_and_ingest_outcomes(client, api_key):
+    before = client.get("/metrics").text
+    client.get("/api/breakdown?dimension=model&days=7")
+    client.get("/api/breakdown?dimension=project&days=30")
+    ev = {"provider": "openai", "model": "gpt-4o", "input_tokens": 10, "request_id": "m-1"}
+    client.post("/v1/events", json={"events": [ev, ev]}, headers={"X-API-Key": api_key})
+    client.get("/no/such/path")
+    after = client.get("/metrics")
+
+    assert after.status_code == 200 and after.headers["content-type"].startswith("text/plain")
+    text = after.text
+
+    def delta(name, **labels):
+        return _metric(text, name, **labels) - _metric(before, name, **labels)
+
+    # Query strings never become labels: both breakdown calls land on one series.
+    assert delta("burnrate_http_requests_total", method="GET", route="/api/breakdown", status="200") == 2
+    assert delta("burnrate_http_requests_total", method="GET", route="unmatched", status="404") == 1
+    assert delta("burnrate_events_ingested_total", outcome="accepted") == 1
+    assert delta("burnrate_events_ingested_total", outcome="duplicate") == 1
+    assert "burnrate_http_request_duration_seconds_bucket" in text
+    assert 'route="/metrics"' not in text  # scrapes don't count themselves
+
+
+def test_metrics_requires_dashboard_token_when_configured(client, monkeypatch):
+    from burnrate.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "dashboard_token", "s3cret")
+    assert client.get("/metrics").status_code == 401
+    assert client.get("/metrics", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+@pytest.fixture
+def fake_redis():
+    import fakeredis
+
+    return fakeredis.FakeAsyncRedis()
+
+
+def test_redis_buckets_are_shared_across_replicas(fake_redis):
+    import asyncio
+
+    from burnrate.ratelimit import RedisTokenBuckets
+
+    async def run():
+        replica_a = RedisTokenBuckets(fake_redis, per_minute=60, burst=3)
+        replica_b = RedisTokenBuckets(fake_redis, per_minute=60, burst=3)
+        results = [await (replica_a if i % 2 else replica_b).acquire("key:x") for i in range(4)]
+        other = await replica_a.acquire("key:y")
+        return results, other
+
+    results, other = asyncio.run(run())
+    # Burst of 3 shared by both replicas: the 4th call is refused no matter which replica serves it.
+    assert [r[0] for r in results] == [True, True, True, False]
+    assert results[-1][2] > 0  # tells the caller how long to wait
+    assert other[0] is True
+
+
+def test_redis_store_fails_open_when_unreachable(caplog):
+    import asyncio
+
+    import redis.asyncio as redis
+
+    from burnrate.ratelimit import RedisTokenBuckets
+
+    dead = redis.from_url("redis://127.0.0.1:1/0", socket_connect_timeout=0.1, socket_timeout=0.1)
+    buckets = RedisTokenBuckets(dead, per_minute=60, burst=1)
+    with caplog.at_level(logging.WARNING):
+        async def run():
+            return [await buckets.acquire("k") for _ in range(3)]
+
+        results = asyncio.run(run())
+    assert all(r[0] for r in results)
+    assert "rate limiter store unavailable" in caplog.text
+
+
+def test_middleware_uses_shared_store(fake_redis):
+    app = FastAPI()
+    app.add_middleware(RateLimitMiddleware, ingest_per_minute=2, api_per_minute=0, redis_client=fake_redis)
+
+    @app.post("/v1/events")
+    def ingest():
+        return {"ok": True}
+
+    with TestClient(app) as c:
+        h = {"X-API-Key": "k"}
+        codes = [c.post("/v1/events", headers=h).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]

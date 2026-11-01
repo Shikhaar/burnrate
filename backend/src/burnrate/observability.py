@@ -19,6 +19,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from burnrate.metrics import HTTP_LATENCY, HTTP_REQUESTS, route_label
+
 request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
 log = logging.getLogger("burnrate.http")
 
@@ -85,8 +87,13 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             raise
         finally:
             request_id_var.reset(token)
-        duration_ms = round((time.perf_counter() - start) * 1000, 1)
+        elapsed = time.perf_counter() - start
+        duration_ms = round(elapsed * 1000, 1)
         response.headers[REQUEST_ID_HEADER] = rid
+        route = route_label(request.scope)
+        if route != "/metrics":
+            HTTP_REQUESTS.labels(request.method, route, str(response.status_code)).inc()
+            HTTP_LATENCY.labels(request.method, route).observe(elapsed)
         if request.url.path != "/healthz":  # health probes would drown everything else
             level = logging.WARNING if response.status_code >= 500 else logging.INFO
             token = request_id_var.set(rid)
