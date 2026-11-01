@@ -17,7 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import type { Timeseries } from "@/lib/api";
-import { isOther, OTHER_COLOR, providerRank, seriesColors, seriesLabel } from "@/lib/colors";
+import { isOther, providerRank, seriesColors, seriesLabel } from "@/lib/colors";
 import { day, dayLong, share as fmtShare, usd, usdCompact } from "@/lib/format";
 import { Dot } from "./ui";
 
@@ -144,13 +144,8 @@ export function TimeseriesArea({
       return (totals.get(b) ?? 0) - (totals.get(a) ?? 0);
     });
   }, [data, dim]);
-  const colors = useMemo(() => {
-    const base = seriesColors(keys, dim);
-    if (!colorMap) return base;
-    const out: Record<string, string> = {};
-    for (const k of keys) out[k] = colorMap[k] ?? (isOther(k) ? base[k] : OTHER_COLOR);
-    return out;
-  }, [keys, dim, colorMap]);
+  // Keys present in colorMap keep the sibling chart's color; timeseries-only keys get unused slots.
+  const colors = useMemo(() => seriesColors(keys, dim, colorMap), [keys, dim, colorMap]);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
 
   const rows = useMemo(

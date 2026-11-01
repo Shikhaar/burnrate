@@ -149,11 +149,17 @@ export default function ReconciliationPage() {
 }
 
 function DailyChart({ query }: { query: ReturnType<typeof useReconciliation> }) {
-  const [provider, setProvider] = useState<string>("all");
+  const [selected, setProvider] = useState<string>("all");
   const providers = useMemo(
     () => [...new Set((query.data?.daily ?? []).map((d) => d.provider))].sort((a, b) => providerRank(a) - providerRank(b)),
     [query.data],
   );
+  // A window change can drop the selected provider from the data (which also hides the picker when
+  // only one provider remains). Fall back to "all" rather than rendering an empty chart, and reset
+  // the stored selection once the new data has arrived.
+  const stale = selected !== "all" && !providers.includes(selected);
+  if (stale && query.data) setProvider("all");
+  const provider = stale ? "all" : selected;
   const rows = useMemo(() => (query.data ? aggregate(query.data, provider) : []), [query.data, provider]);
   const estColor = provider === "all" ? "var(--accent)" : providerColor(provider);
 

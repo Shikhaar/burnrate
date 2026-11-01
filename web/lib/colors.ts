@@ -2,7 +2,7 @@
  * Categorical colors. Values are CSS variables (defined in globals.css for light + dark),
  * so SVG marks re-theme automatically. Colors follow the entity, never its rank.
  */
-const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `var(--series-${i})`);
+const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => `var(--series-${i})`);
 export const OTHER_COLOR = "var(--series-other)";
 
 /** Fixed provider → slot mapping (stable across every page). */
@@ -62,15 +62,22 @@ export function providerLabel(p: string): string {
 /**
  * Assign colors for a list of series keys of an arbitrary dimension.
  * Provider dimension uses the fixed map; for others, keys get slots in the order given
- * (callers pass a stable, cost-ranked key list), and "other" is always gray.
+ * (callers pass a stable, cost-ranked key list). Only the literal "other" bucket is gray.
+ *
+ * `reserved` lets a caller keep colors already assigned elsewhere (e.g. a sibling chart's map):
+ * those keys keep their color, and new keys take the first slots not already in use, wrapping
+ * around the palette only once every slot is taken.
  */
-export function seriesColors(keys: string[], dimension: string): Record<string, string> {
+export function seriesColors(keys: string[], dimension: string, reserved?: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
+  const used = new Set(reserved ? Object.values(reserved) : []);
+  const free = SLOTS.filter((c) => !used.has(c));
   let i = 0;
   for (const k of keys) {
-    if (isOther(k)) out[k] = OTHER_COLOR;
+    if (reserved?.[k]) out[k] = reserved[k];
+    else if (isOther(k)) out[k] = OTHER_COLOR;
     else if (dimension === "provider") out[k] = providerColor(k);
-    else out[k] = i < SLOTS.length ? SLOTS[i++] : OTHER_COLOR;
+    else out[k] = i < free.length ? free[i++] : SLOTS[i++ % SLOTS.length];
   }
   return out;
 }

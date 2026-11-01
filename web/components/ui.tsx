@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Inbox, Minus, RefreshCw, WifiOff } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { SWRResponse } from "swr";
 import { API_URL, type ApiError } from "@/lib/api";
 import { pct } from "@/lib/format";
@@ -130,17 +130,54 @@ export function Segmented<T extends string | number>({
   size?: "sm" | "md";
   ariaLabel?: string;
 }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const checked = options.findIndex((o) => o.value === value);
+  // Roving tabindex: the checked option is the single tab stop (first option if nothing is checked).
+  const tabStop = checked === -1 ? 0 : checked;
+
+  // WAI-ARIA radio group: arrows move focus and select (wrapping), Home/End jump to the ends.
+  const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const n = options.length;
+    let next: number;
+    switch (e.key) {
+      case "ArrowRight":
+      case "ArrowDown":
+        next = (index + 1) % n;
+        break;
+      case "ArrowLeft":
+      case "ArrowUp":
+        next = (index - 1 + n) % n;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = n - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    refs.current[next]?.focus();
+    if (options[next].value !== value) onChange(options[next].value);
+  };
+
   return (
     <div role="radiogroup" aria-label={ariaLabel} className="inline-flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface-2 p-0.5">
-      {options.map((o) => {
-        const active = o.value === value;
+      {options.map((o, i) => {
+        const active = i === checked;
         return (
           <button
             key={String(o.value)}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
             type="button"
             role="radio"
             aria-checked={active}
+            tabIndex={i === tabStop ? 0 : -1}
             onClick={() => onChange(o.value)}
+            onKeyDown={(e) => onKeyDown(e, i)}
             className={clsx(
               "whitespace-nowrap rounded-md font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent",
               size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-xs sm:text-[13px]",
@@ -338,10 +375,22 @@ export function Table({ children, className }: { children: ReactNode; className?
   );
 }
 
-export function Th({ children, align = "left", className }: { children?: ReactNode; align?: "left" | "right" | "center"; className?: string }) {
+export function Th({
+  children,
+  align = "left",
+  className,
+  ariaSort,
+}: {
+  children?: ReactNode;
+  align?: "left" | "right" | "center";
+  className?: string;
+  /** Set on sortable columns; the sort control itself should be a <button> inside the header. */
+  ariaSort?: "ascending" | "descending" | "none";
+}) {
   return (
     <th
       scope="col"
+      aria-sort={ariaSort}
       className={clsx(
         "whitespace-nowrap border-b border-border px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-subtle first:pl-4 last:pr-4 sm:first:pl-5 sm:last:pr-5",
         align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left",

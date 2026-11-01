@@ -164,8 +164,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const wasOpen = useRef(false);
 
-  // Close on navigation.
-  useEffect(() => setOpen(false), [pathname]);
+  // Close on navigation (adjusted during render rather than in an effect, to avoid a cascading re-render).
+  const [lastPath, setLastPath] = useState(pathname);
+  if (lastPath !== pathname) {
+    setLastPath(pathname);
+    setOpen(false);
+  }
 
   // Modal drawer: focus moves in on open, Tab is trapped, Escape closes, focus returns to the menu button.
   useEffect(() => {

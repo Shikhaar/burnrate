@@ -8,12 +8,43 @@ import { providerColor, providerLabel, providerRank } from "@/lib/colors";
 import { day, usdPrice } from "@/lib/format";
 
 type SortKey = "model" | "input_per_mtok" | "output_per_mtok";
+type SortState = { key: SortKey; dir: 1 | -1 };
+
+/** Sortable column header: aria-sort on the <th>, a real <button> as the control. Defined at module
+ * level so the button is not remounted on every sort (which would drop keyboard focus). */
+function SortTh({
+  k,
+  children,
+  align,
+  sort,
+  onSort,
+}: {
+  k: SortKey;
+  children: string;
+  align?: "right";
+  sort: SortState;
+  onSort: (k: SortKey) => void;
+}) {
+  const active = sort.key === k;
+  return (
+    <Th align={align} ariaSort={active ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 rounded uppercase hover:text-fg focus-visible:outline-2 focus-visible:outline-accent"
+        onClick={() => onSort(k)}
+      >
+        {children}
+        {active ? sort.dir === 1 ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden /> : null}
+      </button>
+    </Th>
+  );
+}
 
 export default function PricingPage() {
   const q = usePricing();
   const [provider, setProvider] = useState("all");
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "model", dir: 1 });
+  const [sort, setSort] = useState<SortState>({ key: "model", dir: 1 });
 
   const providers = useMemo(
     () => [...new Set((q.data?.items ?? []).map((p) => p.provider))].sort((a, b) => providerRank(a) - providerRank(b)),
@@ -32,18 +63,8 @@ export default function PricingPage() {
       });
   }, [q.data, provider, search, sort]);
 
-  const SortTh = ({ k, children, align }: { k: SortKey; children: string; align?: "right" }) => (
-    <Th align={align}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 uppercase hover:text-fg"
-        onClick={() => setSort((s) => ({ key: k, dir: s.key === k ? ((s.dir * -1) as 1 | -1) : k === "model" ? 1 : -1 }))}
-      >
-        {children}
-        {sort.key === k ? sort.dir === 1 ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden /> : null}
-      </button>
-    </Th>
-  );
+  const onSort = (k: SortKey) =>
+    setSort((s) => ({ key: k, dir: s.key === k ? ((s.dir * -1) as 1 | -1) : k === "model" ? 1 : -1 }));
 
   return (
     <>
@@ -81,10 +102,16 @@ export default function PricingPage() {
                 <Table>
                   <thead>
                     <tr>
-                      <SortTh k="model">Model</SortTh>
+                      <SortTh k="model" sort={sort} onSort={onSort}>
+                        Model
+                      </SortTh>
                       <Th className="hidden sm:table-cell">Provider</Th>
-                      <SortTh k="input_per_mtok" align="right">Input</SortTh>
-                      <SortTh k="output_per_mtok" align="right">Output</SortTh>
+                      <SortTh k="input_per_mtok" align="right" sort={sort} onSort={onSort}>
+                        Input
+                      </SortTh>
+                      <SortTh k="output_per_mtok" align="right" sort={sort} onSort={onSort}>
+                        Output
+                      </SortTh>
                       <Th align="right" className="hidden md:table-cell">
                         Cached input
                       </Th>

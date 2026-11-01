@@ -21,8 +21,13 @@ function StatusBadge({ status }: { status: UsageEvent["status"] }) {
 
 function CustomerFilter({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
+  const [synced, setSynced] = useState(value);
   // Follow external changes (Clear, back/forward) without remounting, so focus stays in the input.
-  useEffect(() => setDraft(value), [value]);
+  // Adjusting state during render (rather than in an effect) avoids a cascading re-render.
+  if (synced !== value) {
+    setSynced(value);
+    setDraft(value);
+  }
   return (
     <label className="flex min-w-0 flex-col gap-1">
       <span className="text-[11px] font-medium uppercase tracking-wide text-subtle">Customer</span>

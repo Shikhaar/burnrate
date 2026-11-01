@@ -15,6 +15,10 @@ updates:
     groups:
       web:
         patterns: ["*"]
+    ignore:
+      # typescript-eslint (via eslint-config-next) supports TypeScript <6.1; lift once it supports 7.
+      - dependency-name: typescript
+        versions: [">=6.1"]
 
   - package-ecosystem: npm
     directory: /sdk/typescript
