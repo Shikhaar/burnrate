@@ -27,8 +27,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("file", type=Path, nargs="?")
     p.add_argument("--since", type=date.fromisoformat)
 
-    c = sub.add_parser("sync", help="Pull billed costs from provider admin APIs")
-    c.add_argument("provider", choices=["openai", "anthropic", "all"])
+    c = sub.add_parser("sync", help="Pull billed costs (openai, anthropic) or coding-tool usage (cursor, copilot)")
+    c.add_argument("provider", choices=["openai", "anthropic", "cursor", "copilot", "all"])
     c.add_argument("--days", type=int, default=31)
 
     sub.add_parser("alerts", help="Evaluate budgets/anomalies and send new alerts to the webhook")
@@ -61,13 +61,27 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{a.severity}] {a.title} — {a.detail}")
             print(f"{len(fired)} new alert(s).")
         elif args.cmd == "sync":
-            from burnrate.connectors import sync_billing
+            from burnrate.config import get_settings
+            from burnrate.connectors import FETCHERS, USAGE_PROVIDERS, sync_billing, sync_usage
 
             start = datetime.now(UTC).date() - timedelta(days=args.days)
-            providers = ["openai", "anthropic"] if args.provider == "all" else [args.provider]
+            if args.provider == "all":
+                # "all" covers whatever is configured, so a missing key skips that provider.
+                s = get_settings()
+                configured = {"openai": s.openai_admin_key, "anthropic": s.anthropic_admin_key,
+                              "cursor": s.cursor_admin_key, "copilot": s.github_token and s.github_org}
+                providers = [p for p in (*FETCHERS, *USAGE_PROVIDERS) if configured[p]]
+                if not providers:
+                    raise SystemExit("No connector is configured; see `burnrate sync --help` and docs/deploy.md.")
+            else:
+                providers = [args.provider]
             for name in providers:
-                rows = sync_billing(session, name, start)
-                print(f"{name}: upserted {rows} billed-cost rows")
+                if name in USAGE_PROVIDERS:
+                    r = sync_usage(session, name, start)
+                    print(f"{name}: imported {r.accepted} usage events ({r.duplicates} already present)")
+                else:
+                    rows = sync_billing(session, name, start)
+                    print(f"{name}: upserted {rows} billed-cost rows")
     return 0
 
 

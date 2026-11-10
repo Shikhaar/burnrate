@@ -20,6 +20,9 @@ const PROVIDER_SLOT: Record<string, number> = {
   groq: 6,
   together: 7,
   deepseek: 7,
+  // AI coding tools imported by the usage connectors
+  cursor: 8,
+  "github-copilot": 9,
 };
 
 /** Canonical stacking/legend order for providers (matches validated adjacent-slot order). */

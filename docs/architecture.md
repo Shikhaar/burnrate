@@ -1,9 +1,9 @@
 # Architecture
 
 ```
-  Your apps ──► Burnrate SDK (batched, async) ──┐
+  Your apps ──► Burnrate SDK (batched, async) ──┐   (LangChain handler, AI SDK middleware)
   OTel GenAI spans ──► OTLP/HTTP receiver ──────┼──► POST /v1/*  ──► usage_events (immutable)
-                                                │                        │
+  Cursor / Copilot admin APIs ──► usage sync ───┼──────────────────────► │
                                                 │                 pricing engine (versioned registry)
                                                 │                        ▼
   Provider admin APIs ──► billing connectors ───┴──► billed_costs    event_costs (derived)
@@ -27,6 +27,11 @@ only derived data (`burnrate pricing --since 2026-09-01`) and never loses the or
 unlogged retries, tool and search fees, rounding, and billing-day boundaries. The billing
 connectors pull what each provider actually charged into `billed_costs`. The reconciliation view
 compares the two only over days the provider has billed, and flags drift above a tolerance (2%).
+
+**Coding tools are imported, then costed at what they charged.** Cursor and GitHub Copilot
+aren't called through an SDK, so `burnrate sync cursor|copilot` pulls their usage from admin APIs into
+`usage_events` (idempotent keys, so re-syncing is safe). Their models aren't priced per token in the
+registry, so each event's cost is what the tool billed, and reconciliation skips them.
 
 **Two collection paths, no forced gateway.** Teams add the SDK (one line per call) or point an
 existing OpenTelemetry pipeline at `/v1/otlp/v1/traces`. Nothing sits in the inference request

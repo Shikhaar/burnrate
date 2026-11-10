@@ -18,7 +18,8 @@ _PRICED_COLUMNS = (
 )
 
 
-def ingest_events(session: Session, events: list[EventIn], book: PriceBook | None = None) -> IngestResult:
+def ingest_events(session: Session, events: list[EventIn], book: PriceBook | None = None,
+                  source: str = "sdk") -> IngestResult:
     """Persist raw events and their derived cost. Idempotent on `request_id`, including under concurrency."""
     book = book or PriceBook.from_session(session)
 
@@ -37,7 +38,8 @@ def ingest_events(session: Session, events: list[EventIn], book: PriceBook | Non
                 continue
             seen.add(e.request_id)
         ts = (e.timestamp or now).astimezone(UTC)
-        rows.append({**e.model_dump(exclude={"timestamp"}), "timestamp": ts, "day": ts.date()})
+        rows.append({**e.model_dump(exclude={"timestamp"}), "timestamp": ts, "day": ts.date(),
+                     "source": source})
 
     inserted = []
     if rows:

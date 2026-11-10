@@ -41,10 +41,10 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Forecasting** | Month-end projection from a 28-day trend × weekday seasonality, with a 90% confidence band. |
 | **Anomaly detection** | Robust z-score (median/MAD) per project, feature and model. When one problem shows up as several spikes (the same retry loop as a feature, model and project spike), it's reported as one incident. |
 | **Budgets** | Monthly limits company-wide or per project, team, feature or customer, with projected-overrun warnings. |
-| **Coding-agent spend** | Point Claude Code's built-in OpenTelemetry export at Burnrate to see coding-agent spend per engineer, model and session next to production spend. |
+| **Coding-agent spend** | Point Claude Code's built-in OpenTelemetry export at Burnrate, and import Cursor and GitHub Copilot spend from their admin APIs, to see coding-tool spend per engineer, model and tool next to production spend. |
 | **Alerts** | Budget and anomaly alerts sent to Slack or any webhook. Deduplicated even when evaluated concurrently, and failed deliveries are retried with backoff (`burnrate alerts` from cron). |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
-| **Ingestion** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution), an OTLP/HTTP receiver for OpenTelemetry GenAI spans, and a receiver for Claude Code's telemetry. Nothing sits in your request path. |
+| **Ingestion** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution) with a LangChain callback handler and Vercel AI SDK middleware, an OTLP/HTTP receiver for OpenTelemetry GenAI spans, and a receiver for Claude Code's telemetry. Nothing sits in your request path. |
 | **Engineering** | Idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, per-key and per-IP rate limiting (shared across replicas via Redis), structured JSON logs with request IDs, Prometheus metrics, Alembic migrations, health checks, and CI that runs against SQLite, Postgres and the full Docker stack. |
 
 ## Screenshots
@@ -116,6 +116,25 @@ const res = await openai.chat.completions.create({ model: "gpt-4.1", messages })
 br.trackOpenAI(res, { feature: "answer-synthesis", customer_id: "acme" });
 ```
 
+**LangChain** (Python): one callback handler covers every chat model call in a chain or agent. Provider and model come from LangChain's run metadata; tokens from its normalized `usage_metadata`. Run metadata keys such as `customer_id` become attribution.
+
+```python
+from burnrate_sdk.langchain import BurnrateCallbackHandler
+
+handler = BurnrateCallbackHandler(br, feature="support-agent")
+agent.invoke(inputs, config={"callbacks": [handler], "metadata": {"customer_id": "acme"}})
+```
+
+**Vercel AI SDK** (v5 and v6): wrap the model once and every `generateText`, `streamText`, `generateObject` and `streamObject` call is recorded, streams included.
+
+```ts
+import { wrapLanguageModel, streamText } from "ai";
+import { burnrateMiddleware } from "@burnrate/sdk";
+
+const model = wrapLanguageModel({ model: anthropic("claude-sonnet-4-5"), middleware: burnrateMiddleware(br, { feature: "chat" }) });
+streamText({ model, prompt, providerOptions: { burnrate: { customer_id: "acme" } } });  // per-call attribution
+```
+
 **OpenTelemetry:** point any OTLP/HTTP JSON exporter at `POST /v1/otlp/v1/traces` with the `X-API-Key` header. Spans carrying `gen_ai.*` attributes become usage events. Add `burnrate.feature`, `burnrate.team` and `burnrate.customer_id` for attribution.
 
 **Claude Code (coding-agent spend per engineer)** — no code changes, just environment variables (or managed settings):
@@ -131,6 +150,17 @@ export OTEL_RESOURCE_ATTRIBUTES="burnrate.team=platform"                   # opt
 
 The `claude_code.token.usage` and `claude_code.cost.usage` counters become usage events under project `claude-code`, attributed by `user.email`, model and session. Burnrate prices them from its registry. For models it doesn't have a price for yet, it falls back to the cost Claude Code reports.
 
+**Cursor and GitHub Copilot** (admin APIs, no client changes):
+
+```bash
+export BURNRATE_CURSOR_ADMIN_KEY=key_…                               # Cursor team admin API key
+export BURNRATE_GITHUB_TOKEN=github_pat_…  BURNRATE_GITHUB_ORG=acme   # org owner or billing manager
+burnrate sync cursor --days 30
+burnrate sync copilot --days 30
+```
+
+Cursor's usage events become one Burnrate event per request (project `cursor`, attributed by user email, with tokens and what Cursor charged). Copilot spend comes from GitHub's billing usage report, one event per day and SKU (seats, premium requests) under project `github-copilot`. Both are costed at what the tool charged, so they are left out of reconciliation.
+
 **Raw HTTP**
 
 ```bash
@@ -143,7 +173,7 @@ curl -X POST localhost:8000/v1/events -H "X-API-Key: $KEY" -H 'content-type: app
 
 ```bash
 export BURNRATE_OPENAI_ADMIN_KEY=sk-admin-…  BURNRATE_ANTHROPIC_ADMIN_KEY=sk-ant-admin-…
-burnrate sync all --days 31
+burnrate sync all --days 31   # every configured connector, including Cursor and Copilot
 ```
 
 ## Demo dataset
@@ -174,14 +204,14 @@ docs/            architecture, event schema, API contract, deployment, demo scri
 
 Burnrate is a complete, tested reference implementation, not yet a hosted service:
 
-- **Verified:** 53 backend tests and SDK tests in both languages. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
+- **Verified:** 57 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
 - **Not yet built:** user accounts and multi-tenant organizations (the dashboard API is protected by a single optional token), distributed tracing, and a built-in scheduler for alerts and billing sync (use cron; see [deploy.md](docs/deploy.md)).
-- **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing connector is tested against sample responses, not yet against the live API.
+- **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing, Cursor and GitHub Copilot connectors are tested against sample responses built from the API docs, not yet against the live APIs.
 
 ## Roadmap
 
-- LangChain / LlamaIndex / Vercel AI SDK callbacks
-- More coding agents (Cursor, Copilot, Codex) via their admin APIs
+- LlamaIndex callbacks
+- More coding agents (Codex, Windsurf), and Copilot premium requests broken down by model
 - Email alerts and per-team routing
 - User accounts, multi-tenant orgs, SSO and role-based access control
 - Hosted demo

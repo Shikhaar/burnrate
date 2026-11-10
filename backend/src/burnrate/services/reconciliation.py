@@ -8,6 +8,8 @@ from burnrate.services.analytics import COST, Window, _as_date, _base, _in
 
 # Deltas inside this band are normal (rounding, billing-day boundaries, unlogged retries).
 TOLERANCE_PCT = 2.0
+# Usage connectors store what these tools charged as the event cost, so there is no estimate to check.
+BILLED_AT_SOURCE = {"cursor", "github-copilot"}
 
 
 def reconcile(session: Session, days: int) -> dict:
@@ -23,6 +25,8 @@ def reconcile(session: Session, days: int) -> dict:
 
     cells: dict[tuple, dict] = {}
     for d, p, c in est_rows:
+        if p in BILLED_AT_SOURCE:
+            continue
         cells.setdefault((_as_date(d), p), {"estimated_usd": 0.0, "billed_usd": None})["estimated_usd"] = float(c)
     for d, p, c in billed_rows:
         cells.setdefault((_as_date(d), p), {"estimated_usd": 0.0, "billed_usd": None})["billed_usd"] = float(c)

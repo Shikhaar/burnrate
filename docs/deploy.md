@@ -36,6 +36,8 @@ state lives in Postgres.
 | `BURNRATE_API_RATE_LIMIT_PER_MINUTE` | Requests per minute per client IP on `/api/*` (default 600; `0` disables) |
 | `BURNRATE_REDIS_URL` | e.g. `redis://redis:6379/0`. Shares rate limits across API replicas; unset = per-process limits |
 | `BURNRATE_OPENAI_ADMIN_KEY` / `BURNRATE_ANTHROPIC_ADMIN_KEY` | Read-only billing sync for reconciliation |
+| `BURNRATE_CURSOR_ADMIN_KEY` | Cursor team admin API key; `burnrate sync cursor` imports per-request usage |
+| `BURNRATE_GITHUB_TOKEN` / `BURNRATE_GITHUB_ORG` | Token of an org owner or billing manager, and the org; `burnrate sync copilot` imports Copilot spend |
 
 ## Logging and rate limits
 
@@ -73,7 +75,7 @@ Run these from cron, a platform scheduler, or a Kubernetes CronJob using the API
 
 ```
 */15 * * * *  burnrate alerts          # budget + anomaly notifications (deduplicated; failed webhooks retried)
-0 6 * * *     burnrate sync all --days 7   # pull provider-billed costs
+0 6 * * *     burnrate sync all --days 7   # billed costs + Cursor/Copilot usage (configured connectors only)
 ```
 
 ## Price updates

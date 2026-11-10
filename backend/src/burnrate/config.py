@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     openai_admin_key: str = ""
     anthropic_admin_key: str = ""
 
+    # AI coding tools imported as usage events (see `burnrate sync cursor|copilot`).
+    cursor_admin_key: str = ""
+    # Token for an org owner or billing manager; reads the org's billing usage report.
+    github_token: str = ""
+    github_org: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
