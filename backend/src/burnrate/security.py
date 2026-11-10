@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import secrets
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from burnrate.db import get_session
 from burnrate.models import ApiKey
 
 KEY_PREFIX = "br_live_"
+# How stale `last_used_at` may get: enough to tell a live key from an abandoned one, without a write per batch.
+LAST_USED_RESOLUTION = timedelta(minutes=5)
 
 
 def hash_key(raw: str) -> str:
@@ -34,6 +37,37 @@ def require_ingest_key(
     key = session.scalar(select(ApiKey).where(ApiKey.key_hash == hash_key(x_api_key)))
     if key is None or key.revoked_at is not None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or revoked API key")
+    now = datetime.now(UTC)
+    last = _aware(key.last_used_at)
+    if last is None or now - last >= LAST_USED_RESOLUTION:
+        key.last_used_at = now
+        session.commit()
+    return key
+
+
+def _aware(ts: datetime | None) -> datetime | None:
+    # SQLite returns naive datetimes; everything is stored as UTC.
+    return ts.replace(tzinfo=UTC) if ts is not None and ts.tzinfo is None else ts
+
+
+def list_api_keys(session: Session) -> list[ApiKey]:
+    return list(session.scalars(select(ApiKey).order_by(ApiKey.id)))
+
+
+def revoke_api_key(session: Session, key_ref: str) -> ApiKey | None:
+    """Revoke by id (from `burnrate list-keys`) or by the raw key itself, e.g. one found in a leak.
+
+    Takes effect on the next request: every request re-checks the key. Returns None if nothing matches.
+    Revoking twice keeps the original revocation time.
+    """
+    ref = key_ref.strip()
+    if ref.isdigit():
+        key = session.get(ApiKey, int(ref))
+    else:
+        key = session.scalar(select(ApiKey).where(ApiKey.key_hash == hash_key(ref)))
+    if key is not None and key.revoked_at is None:
+        key.revoked_at = datetime.now(UTC)
+        session.commit()
     return key
 
 

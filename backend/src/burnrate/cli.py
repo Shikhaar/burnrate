@@ -23,6 +23,11 @@ def main(argv: list[str] | None = None) -> int:
     k = sub.add_parser("create-key", help="Create an ingest API key")
     k.add_argument("name")
 
+    sub.add_parser("list-keys", help="List ingest API keys with when each was last used")
+
+    r = sub.add_parser("revoke-key", help="Revoke an ingest API key immediately")
+    r.add_argument("key", help="Key id from list-keys, or the full br_live_ key")
+
     p = sub.add_parser("pricing", help="Load a price registry YAML and reprice events")
     p.add_argument("file", type=Path, nargs="?")
     p.add_argument("--since", type=date.fromisoformat)
@@ -49,6 +54,23 @@ def main(argv: list[str] | None = None) -> int:
 
             print(create_api_key(session, args.name))
             print("Store this key now; it cannot be shown again.", file=sys.stderr)
+        elif args.cmd == "list-keys":
+            from burnrate.security import list_api_keys
+
+            keys = list_api_keys(session)
+            if not keys:
+                print("No API keys. Create one with `burnrate create-key <name>`.")
+            for key in keys:
+                print(_key_row(key))
+        elif args.cmd == "revoke-key":
+            from burnrate.security import revoke_api_key
+
+            key = revoke_api_key(session, args.key)
+            if key is None:
+                # Don't echo the argument: it may be a raw key.
+                print("No matching key. Use the id from `burnrate list-keys` or the full key.", file=sys.stderr)
+                return 1
+            print(f"Revoked: {_key_row(key)}")
         elif args.cmd == "pricing":
             added = sync_registry(session, args.file) if args.file else 0
             n = reprice(session, since=args.since)
@@ -83,6 +105,16 @@ def main(argv: list[str] | None = None) -> int:
                     rows = sync_billing(session, name, start)
                     print(f"{name}: upserted {rows} billed-cost rows")
     return 0
+
+
+def _when(ts: datetime | None) -> str:
+    return ts.strftime("%Y-%m-%d %H:%M UTC") if ts else "never"
+
+
+def _key_row(key) -> str:
+    state = f"revoked {_when(key.revoked_at)}" if key.revoked_at else "active"
+    return (f"{key.id:>4}  {key.prefix}…  {key.name:<24}  created {_when(key.created_at)}  "
+            f"last used {_when(key.last_used_at)}  {state}")
 
 
 if __name__ == "__main__":

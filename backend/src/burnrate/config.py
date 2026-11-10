@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     # Slack-compatible incoming webhook for budget/anomaly alerts (POST {"text": ...}).
     alert_webhook_url: str = ""
 
-    # Provider admin keys used by the billing connectors (never the app's inference keys).
+    # Provider admin keys used by `burnrate sync` (never the app's inference keys). Only read-only endpoints are
+    # called, but the keys can manage the account: give them to the sync job only, not the API service.
     openai_admin_key: str = ""
     anthropic_admin_key: str = ""
 

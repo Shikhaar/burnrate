@@ -1,4 +1,5 @@
-"""Connectors for provider admin APIs. They use read-only admin keys and never see prompts.
+"""Connectors for provider admin APIs. They call only read-only cost and usage endpoints and never
+see prompts. The admin keys themselves can manage the provider account; see docs/deploy.md.
 
 - Billing connectors (OpenAI, Anthropic) pull what the provider charged into `BilledCost` for
   reconciliation against Burnrate's token-based estimates.

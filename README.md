@@ -89,7 +89,11 @@ open http://localhost:3000
 
 ```bash
 burnrate create-key "support-agent prod"     # → br_live_…  (only the hash is stored)
+burnrate list-keys                           # id, name, created, last used, active/revoked
+burnrate revoke-key 3                        # by id, or pass the leaked br_live_… key itself
 ```
+
+Ingest keys can only *write* usage events: they can't read spend, call the dashboard API or reach your providers. Use one key per service so a leak is contained, and revoke a leaked key to reject it from the next request. Provider admin keys are a different matter; see [Keys and access](docs/deploy.md#keys-and-access).
 
 **Python SDK** (not on PyPI yet: `pip install ./sdk/python`)
 
@@ -169,7 +173,7 @@ curl -X POST localhost:8000/v1/events -H "X-API-Key: $KEY" -H 'content-type: app
               "input_tokens":1200,"cached_input_tokens":800,"output_tokens":350,"request_id":"req_123"}]}'
 ```
 
-**Reconcile against real bills** (read-only admin keys)
+**Reconcile against real bills** (provider admin keys; Burnrate only calls their read-only cost endpoints, but the keys themselves can manage your account, so see [Keys and access](docs/deploy.md#keys-and-access))
 
 ```bash
 export BURNRATE_OPENAI_ADMIN_KEY=sk-admin-…  BURNRATE_ANTHROPIC_ADMIN_KEY=sk-ant-admin-…
@@ -204,7 +208,7 @@ docs/            architecture, event schema, API contract, deployment, demo scri
 
 Burnrate is a complete, tested reference implementation, not yet a hosted service:
 
-- **Verified:** 57 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
+- **Verified:** 60 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
 - **Not yet built:** user accounts and multi-tenant organizations (the dashboard API is protected by a single optional token), distributed tracing, and a built-in scheduler for alerts and billing sync (use cron; see [deploy.md](docs/deploy.md)).
 - **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing, Cursor and GitHub Copilot connectors are tested against sample responses built from the API docs, not yet against the live APIs.
 

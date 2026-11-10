@@ -35,9 +35,48 @@ state lives in Postgres.
 | `BURNRATE_INGEST_RATE_LIMIT_PER_MINUTE` | Requests per minute per ingest API key (default 1200; `0` disables) |
 | `BURNRATE_API_RATE_LIMIT_PER_MINUTE` | Requests per minute per client IP on `/api/*` (default 600; `0` disables) |
 | `BURNRATE_REDIS_URL` | e.g. `redis://redis:6379/0`. Shares rate limits across API replicas; unset = per-process limits |
-| `BURNRATE_OPENAI_ADMIN_KEY` / `BURNRATE_ANTHROPIC_ADMIN_KEY` | Read-only billing sync for reconciliation |
-| `BURNRATE_CURSOR_ADMIN_KEY` | Cursor team admin API key; `burnrate sync cursor` imports per-request usage |
+| `BURNRATE_OPENAI_ADMIN_KEY` / `BURNRATE_ANTHROPIC_ADMIN_KEY` | Billing sync for reconciliation. Full admin keys: see [Keys and access](#keys-and-access) |
+| `BURNRATE_CURSOR_ADMIN_KEY` | Cursor team admin API key; `burnrate sync cursor` imports per-request usage. Full admin key |
 | `BURNRATE_GITHUB_TOKEN` / `BURNRATE_GITHUB_ORG` | Token of an org owner or billing manager, and the org; `burnrate sync copilot` imports Copilot spend |
+
+The admin keys are only needed by `burnrate sync`. Leave them off the API service; see below.
+
+## Keys and access
+
+Burnrate never needs your code, your repositories or the API keys your apps use for inference.
+It handles two kinds of credentials, with very different risk:
+
+**Ingest keys (`br_live_…`)** live in your apps. They can only write usage events: they can't read
+spend, call `/api/*` or reach any provider. Burnrate stores only their SHA-256 hash. A leaked one
+lets someone add fake usage, nothing more. Create one per service, and manage them with:
+
+```bash
+burnrate list-keys          # id, name, created, last used (to within 5 minutes), active/revoked
+burnrate revoke-key 3       # by id, or by the full key, e.g. one found in a leak
+```
+
+A revoked key is rejected from its next request. To rotate, create the new key, deploy it, wait for
+the old key's "last used" to stop moving, then revoke it.
+
+**Provider admin keys** are powerful. Burnrate only calls read-only endpoints with them (cost and
+usage reports), but the keys themselves are not read-only:
+
+| Key | What Burnrate calls | What the key can also do |
+|---|---|---|
+| OpenAI admin key | Costs API | Manage the organization: invite and remove members, projects, API keys |
+| Anthropic admin key | Cost report | Manage the organization: members, workspaces, API keys |
+| Cursor admin API key | Usage events | Manage team settings such as members' spend limits |
+| GitHub token | Billing usage report | Only what you grant: use a fine-grained token with the least org access the billing usage endpoint accepts (GitHub's docs for that endpoint list it) |
+
+Treat the first three like root credentials:
+
+- **Keep them off the API service.** The web-facing API never uses them. Run `burnrate sync` as its
+  own scheduled job (same image, different command) and give only that job the keys.
+- **Inject them from a secrets manager** (AWS Secrets Manager, Vault, Kubernetes secrets, your
+  platform's secret store) as environment variables. Burnrate never writes them to its database.
+- **Skip them if you don't need them.** Without them you lose billing reconciliation and the
+  Cursor/Copilot import; SDK, OpenTelemetry and Claude Code ingestion are unaffected.
+- **Rotate them on the provider's side** if one may have leaked; revoking there takes effect at once.
 
 ## Logging and rate limits
 
@@ -77,6 +116,8 @@ Run these from cron, a platform scheduler, or a Kubernetes CronJob using the API
 */15 * * * *  burnrate alerts          # budget + anomaly notifications (deduplicated; failed webhooks retried)
 0 6 * * *     burnrate sync all --days 7   # billed costs + Cursor/Copilot usage (configured connectors only)
 ```
+
+Give the admin keys only to the `burnrate sync` job, not to the API service (see [Keys and access](#keys-and-access)).
 
 ## Price updates
 
