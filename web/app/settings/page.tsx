@@ -84,8 +84,24 @@ export default function SettingsPage() {
 /* ---------------- Alerts (Slack, Jira) ---------------- */
 
 function AlertsTab() {
+  const enc = useAlertSettings().data?.encryption;
   return (
     <div className="space-y-4">
+      {enc && !enc.key_set ? (
+        <div role="alert" className="rounded-lg bg-warn-soft px-3 py-2.5 text-sm text-warn">
+          <p className="font-medium">Set an encryption key before connecting Slack or Jira</p>
+          <p className="mt-0.5 text-fg-2">
+            Burnrate stores the Slack link and Jira token encrypted, with a key kept outside its database. On the server, run{" "}
+            <code className="font-mono text-xs">burnrate generate-secret-key</code>, set the result as{" "}
+            <code className="font-mono text-xs">BURNRATE_SECRET_KEY</code>, and restart Burnrate.
+          </p>
+        </div>
+      ) : null}
+      {enc?.problems.map((p) => (
+        <Problem key={p} title="A saved secret needs attention">
+          {p}
+        </Problem>
+      ))}
       <SlackSection />
       <JiraSection />
     </div>

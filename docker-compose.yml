@@ -28,6 +28,9 @@ services:
       BURNRATE_REDIS_URL: redis://redis:6379/0
       BURNRATE_CORS_ORIGINS: '["http://localhost:3000"]'
       BURNRATE_LOG_FORMAT: json
+      # Encrypts the Slack link and Jira token saved from Settings: `docker compose run --rm api burnrate
+      # generate-secret-key`, then put BURNRATE_SECRET_KEY=... in a .env file next to this one.
+      BURNRATE_SECRET_KEY: ${BURNRATE_SECRET_KEY:-}
     ports:
       - "8000:8000"
     depends_on:

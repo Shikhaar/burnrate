@@ -59,7 +59,8 @@ def load(session: Session) -> JiraConfig | None:
 
 
 def save(session: Session, cfg: JiraConfig) -> None:
-    for k in KEYS:
+    # The token first: if it can't be encrypted, nothing else is written.
+    for k in ("api_token", *(k for k in KEYS if k != "api_token")):
         app_settings.put(session, _key(k), getattr(cfg, k))
 
 

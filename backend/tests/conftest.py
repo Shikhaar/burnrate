@@ -3,6 +3,8 @@ import os
 import pytest
 
 os.environ["BURNRATE_DATABASE_URL"] = "sqlite:///:memory:"
+# Test-only key so secrets saved in tests are encrypted, as in production.
+os.environ.setdefault("BURNRATE_SECRET_KEY", "xOnXPiGLLfiZw56WR4Y3-sBDRyf2LH_Y5fPEdFPtn5c=")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402

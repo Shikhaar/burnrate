@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("name")
 
     sub.add_parser("list-keys", help="List ingest API keys with when each was last used")
+    sub.add_parser("generate-secret-key", help="Print a new BURNRATE_SECRET_KEY for encrypting saved secrets")
 
     u = sub.add_parser("create-user", help="Create a dashboard login (login becomes required once one exists)")
     u.add_argument("email")
@@ -59,6 +60,13 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("alerts", help="Evaluate budgets/anomalies and send new alerts to the webhook")
 
     args = parser.parse_args(argv)
+    if args.cmd == "generate-secret-key":  # needs no database
+        from burnrate.services.secrets import generate_key
+
+        print(generate_key())
+        print("Set it as BURNRATE_SECRET_KEY on the API and sync jobs. Keep it out of the database and backups.",
+              file=sys.stderr)
+        return 0
     init_db()
     with SessionLocal() as session:
         sync_registry(session)

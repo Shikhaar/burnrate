@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from burnrate.auth import require_admin
 from burnrate.config import get_settings
 from burnrate.db import get_session
-from burnrate.services import alerts, app_settings, jira
+from burnrate.services import alerts, app_settings, jira, secrets
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_admin)])
 
@@ -29,6 +29,7 @@ def _alerts_status(session: Session) -> dict:
         "source": source,  # "dashboard" | "environment" | null
         "webhook_hint": app_settings.mask_webhook(url) if url else None,
         "is_slack": app_settings.is_slack(url) if url else None,
+        "encryption": {"key_set": secrets.configured(), "problems": app_settings.secret_problems(session)},
         "timer": {"enabled": interval > 0, "interval_minutes": interval,
                   "last_run_at": app_settings.get(session, app_settings.LAST_RUN_KEY),
                   "last_run_error": app_settings.get(session, app_settings.LAST_RUN_ERROR_KEY)},
@@ -51,7 +52,10 @@ def save_webhook(body: WebhookIn, session: Session = Depends(get_session)) -> di
     problem = alerts.send_test(url)
     if problem:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, problem)
-    app_settings.put(session, app_settings.WEBHOOK_KEY, url)
+    try:
+        app_settings.put(session, app_settings.WEBHOOK_KEY, url)
+    except secrets.SecretKeyMissing as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
     return _alerts_status(session)
 
 
@@ -104,7 +108,12 @@ def save_jira(body: JiraIn, session: Session = Depends(get_session)) -> dict:
             found = jira.verify(cfg, http)
     except jira.JiraError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
-    jira.save(session, cfg)
+    try:
+        jira.save(session, cfg)
+    except secrets.SecretKeyMissing as e:
+        session.rollback()
+        jira.clear(session)  # never leave half a connection saved
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
     return {**jira.status(session), "verified": found}
 
 

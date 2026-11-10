@@ -400,6 +400,8 @@ export interface AlertSettings {
   source: "dashboard" | "environment" | null;
   webhook_hint: string | null;
   is_slack: boolean | null;
+  /** Whether BURNRATE_SECRET_KEY is set, and any saved secret that's unencrypted or unreadable. */
+  encryption: { key_set: boolean; problems: string[] };
   timer: { enabled: boolean; interval_minutes: number; last_run_at: string | null; last_run_error: string | null };
   last_delivered_at: string | null;
   last_failure: { at: string; error: string; title: string } | null;

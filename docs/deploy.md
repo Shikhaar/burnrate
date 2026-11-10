@@ -34,6 +34,7 @@ state lives in Postgres.
 | `BURNRATE_SESSION_DAYS` | How long a dashboard sign-in lasts (default 14) |
 | `BURNRATE_COOKIE_SECURE` | Default `true`: the session cookie is HTTPS-only. Set `false` only for plain-HTTP testing on a host other than localhost |
 | `BURNRATE_ALERT_WEBHOOK_URL` | Slack-compatible incoming webhook. Optional: admins can connect Slack from Settings instead, which takes priority |
+| `BURNRATE_SECRET_KEY` | Encrypts the Slack link and Jira token saved from Settings; required to save them. `burnrate generate-secret-key` makes one. See [Encrypted secrets](#encrypted-secrets) |
 | `BURNRATE_ALERT_INTERVAL_MINUTES` | How often the API checks for new alerts (default 15; `0` = off, use `burnrate alerts` from cron) |
 | `BURNRATE_LOG_FORMAT` / `BURNRATE_LOG_LEVEL` | `json` for log pipelines (default `text`); level defaults to `INFO` |
 | `BURNRATE_INGEST_RATE_LIMIT_PER_MINUTE` | Requests per minute per ingest API key (default 1200; `0` disables) |
@@ -102,8 +103,31 @@ Each alert files at most one ticket, even with several API replicas, and failed 
 on later checks (up to 5). Tickets are labelled `burnrate` and `burnrate-budget` or `burnrate-anomaly`.
 
 The token acts as the Jira user who created it, so create a dedicated bot user that can only create
-issues in that project. The Slack link and Jira token are stored in Burnrate's database (never sent
-back to the browser), so protect database access and backups like any other secret store.
+issues in that project.
+
+### Encrypted secrets
+
+The Slack link and Jira token are the only secrets Burnrate stores in its database, and they're
+encrypted (Fernet: AES with an integrity check) with `BURNRATE_SECRET_KEY`, which lives only in the
+server's environment. Someone with a copy of the database or a backup, but not the key, can't read
+or use them. They are never sent back to the browser either: Settings shows only a shortened link
+and the token's last four characters.
+
+```bash
+burnrate generate-secret-key          # prints a new key
+```
+
+- **Required to save them.** Without the key, connecting Slack or Jira is refused rather than stored
+  unprotected, and Settings says how to set it.
+- **Upgrading:** values saved by an older version, in plain text, are encrypted the next time the
+  API starts with a key set.
+- **Rotating:** set `BURNRATE_SECRET_KEY=<new>,<old>` and restart. The first key encrypts; all listed
+  keys can decrypt, and saved values move to the new key on start. Then remove the old key.
+- **Lost or wrong key:** saved secrets can't be read. Burnrate keeps running, treats Slack and Jira as
+  disconnected, says so in Settings, and never overwrites the stored values. Reconnect them, or
+  restore the right key.
+
+Keep the key in a secrets manager, never in the database, its backups or the repository.
 
 Passwords need at least 10 characters and are stored as salted scrypt hashes. Sessions are random
 tokens in an HttpOnly, SameSite=Lax cookie; only their hash is stored. Writes made with the cookie

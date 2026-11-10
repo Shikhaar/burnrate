@@ -15,14 +15,17 @@ from burnrate.observability import REQUEST_ID_HEADER, RequestContextMiddleware, 
 from burnrate.pricing import sync_registry
 from burnrate.ratelimit import RateLimitMiddleware
 from burnrate.security import require_dashboard_token
+from burnrate.services import app_settings, secrets
 from burnrate.services.scheduler import alert_timer
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    secrets.validate()  # a malformed BURNRATE_SECRET_KEY should stop startup, not the first alert
     with SessionLocal() as session:
         sync_registry(session)
+        app_settings.encrypt_stored_secrets(session)
     async with alert_timer(get_settings().alert_interval_minutes):
         yield
 

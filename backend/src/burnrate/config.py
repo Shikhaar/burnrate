@@ -26,6 +26,9 @@ class Settings(BaseSettings):
 
     # Slack-compatible incoming webhook for budget/anomaly alerts (POST {"text": ...}).
     alert_webhook_url: str = ""  # fallback; a webhook saved in the dashboard (Settings → Alerts) wins
+    # Encrypts the Slack link and Jira token saved from Settings. Keep it out of the database and its backups.
+    # Generate with `burnrate generate-secret-key`; rotate with "<new>,<old>".
+    secret_key: str = ""
     # The API checks budgets and anomalies on its own every N minutes and posts new alerts. 0 = off (use cron).
     alert_interval_minutes: int = 15
 
