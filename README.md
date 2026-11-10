@@ -75,7 +75,11 @@ The dashboard is open until you create the first login. After that, everyone has
 cd backend && .venv/bin/burnrate create-user you@company.com --name "Your Name"   # prompts for a password
 ```
 
-That first account is an admin. Add everyone else from **Settings → Users**: pick a role and teams, and Burnrate gives you a one-time link to send them.
+That first account is an admin. Everything else is done from **Settings** in the dashboard (admins only):
+
+- **Users:** add people with a role (admin, member, viewer) and, optionally, the teams they may see. Burnrate gives you a one-time link to send them.
+- **API keys:** create a key for each app, see when each was last used, revoke one.
+- **Alerts:** connect a Slack channel and a Jira project. Burnrate tests each connection before saving it.
 
 Stream live traffic through the real SDK while the dashboard is open:
 
@@ -95,6 +99,8 @@ open http://localhost:3000
 > CI builds these images and runs this exact stack on every push, including seeding, live ingestion and loading every dashboard page.
 
 ## Send real usage
+
+Each app needs an ingest key. Create one in **Settings → API keys** (the full key is shown once, with a copy button), or from the CLI:
 
 ```bash
 burnrate create-key "support-agent prod"     # → br_live_…  (only the hash is stored)
@@ -202,7 +208,7 @@ burnrate sync all --days 31   # every configured connector, including Cursor and
 
 ## Tech
 
-**Backend:** Python 3.12, FastAPI, SQLAlchemy 2.0, Pydantic v2, PostgreSQL / SQLite, httpx · **Dashboard:** Next.js 16, React 19, TypeScript, Tailwind CSS v4, Recharts · **Infra:** Docker Compose, GitHub Actions (backend on SQLite + Postgres, SDKs on Python 3.10 & 3.13 and Node 22, web lint + build, full Docker stack boot)
+**Backend:** Python 3.11+ (Docker image on 3.14), FastAPI, SQLAlchemy 2.0, Pydantic v2, PostgreSQL / SQLite, httpx · **Dashboard:** Next.js 16, React 19, TypeScript, Tailwind CSS v4, Recharts · **Infra:** Docker Compose, GitHub Actions (backend on SQLite + Postgres, SDKs on Python 3.10 & 3.13 and Node 22, web lint + build, full Docker stack boot)
 
 ```
 backend/         FastAPI service, pricing engine, analytics, connectors, CLI, tests
@@ -219,7 +225,7 @@ Burnrate is a complete, tested reference implementation, not yet a hosted servic
 
 - **Verified:** 83 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
 - **Not yet built:** multi-tenant organizations, SSO, sending email (invite and reset links are copied and sent by the admin), distributed tracing, and a built-in scheduler for billing sync (use cron; see [deploy.md](docs/deploy.md)).
-- **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing, Cursor and GitHub Copilot connectors are tested against sample responses built from the API docs, not yet against the live APIs.
+- **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing, Cursor and GitHub Copilot connectors, and the Slack and Jira alert integrations, are tested against stand-ins built from each API's docs, not yet against the live services.
 
 ## Roadmap
 
