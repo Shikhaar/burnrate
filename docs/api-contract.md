@@ -55,3 +55,4 @@ scoped to `team=<one of theirs>`.
 | GET | `/api/keys` | `{items:[{id,name,prefix,created_at,last_used_at,revoked_at}]}` |
 | POST | `/api/keys` | body `{name}` → `{key, secret}`; `secret` is the full key, returned only here |
 | POST | `/api/keys/{id}/revoke` | `{key}` |
+| DELETE | `/api/keys/{id}` | `204`; only revoked keys (`409` for an active one: revoke it first) |

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -135,3 +135,16 @@ def revoke_key(key_id: int, session: Session = Depends(get_session)) -> dict:
     if key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Key not found")
     return {"key": key_out(key)}
+
+
+@router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_key(key_id: int, session: Session = Depends(get_session)) -> Response:
+    """Remove a revoked key from the list. Active keys must be revoked first, so deleting never breaks an app."""
+    key = session.get(ApiKey, key_id)
+    if key is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Key not found")
+    if key.revoked_at is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Revoke this key before deleting it.")
+    session.delete(key)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

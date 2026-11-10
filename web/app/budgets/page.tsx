@@ -292,7 +292,7 @@ function BudgetCard({ budget: b, onDeleted, canEdit }: { budget: Budget; onDelet
             <Button size="sm" variant="ghost" onClick={() => setConfirm(false)} disabled={busy}>
               Cancel
             </Button>
-            <Button size="sm" className="bg-bad text-white hover:opacity-90" onClick={remove} disabled={busy}>
+            <Button size="sm" variant="destructive" onClick={remove} disabled={busy}>
               {busy ? "Deleting…" : "Delete"}
             </Button>
           </>

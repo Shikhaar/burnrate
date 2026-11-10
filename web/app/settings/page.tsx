@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { BellRing, Check, Copy, ExternalLink, KeyRound, Link2, Plus, Send, Ticket, Unplug, UserPlus, Users, X } from "lucide-react";
+import { BellRing, Check, ChevronRight, Copy, ExternalLink, KeyRound, Link2, Plus, Send, Ticket, Trash2, Unplug, UserPlus, Users, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Badge, Button, Card, CardBody, CardHeader, DataState, EmptyState, PageHeader, Segmented, TableSkeleton } from "@/components/ui";
@@ -10,6 +10,7 @@ import {
   connectJira,
   createJiraTestTicket,
   createKey,
+  deleteKey,
   disconnectJira,
   disconnectWebhook,
   inviteUser,
@@ -24,6 +25,7 @@ import {
   useMeta,
   useUsers,
   type AdminUser,
+  type IngestKey,
   type InviteLink,
 } from "@/lib/api";
 import { ROLE_HELP, ROLE_LABEL, useMe, usePermissions, type Role } from "@/lib/auth";
@@ -710,7 +712,7 @@ function KeysTab() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState<{ name: string; secret: string } | null>(null);
-  const [confirming, setConfirming] = useState<number | null>(null);
+  const [showRevoked, setShowRevoked] = useState(false);
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -725,17 +727,6 @@ function KeysTab() {
       setError(errorText(err, "Couldn't create the key."));
     } finally {
       setBusy(false);
-    }
-  };
-
-  const revoke = async (id: number) => {
-    setError(null);
-    try {
-      await revokeKey(id);
-      setConfirming(null);
-      await q.mutate();
-    } catch (err) {
-      setError(errorText(err, "Couldn't revoke the key."));
     }
   };
 
@@ -761,44 +752,114 @@ function KeysTab() {
           {error ? <p role="alert" className="mb-3 rounded-lg bg-bad-soft px-3 py-2 text-sm text-bad">{error}</p> : null}
           <DataState query={q} loading={<TableSkeleton rows={3} cols={4} />} isEmpty={(d) => d.items.length === 0}
             empty={<EmptyState icon={<KeyRound className="size-5" aria-hidden />} title="No keys yet" description="Create one for each app that calls an AI model." />}>
-            {(d) => (
-              <ul className="divide-y divide-border">
-                {[...d.items].reverse().map((k) => (
-                  <li key={k.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-fg">{k.name}</p>
-                      <p className="truncate text-xs text-muted">
-                        <span className="font-mono">{k.prefix}…</span> · created {timestamp(k.created_at)} · last used {when(k.last_used_at)}
-                      </p>
+            {(d) => {
+              const newestFirst = [...d.items].reverse();
+              const active = newestFirst.filter((k) => !k.revoked_at);
+              const revoked = newestFirst.filter((k) => k.revoked_at);
+              return (
+                <>
+                  {active.length ? (
+                    <ul className="divide-y divide-border">
+                      {active.map((k) => (
+                        <KeyRow key={k.id} k={k} onChanged={() => void q.mutate()} onError={setError} />
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="py-3 text-sm text-muted">No active keys. Create one above for each app that sends usage.</p>
+                  )}
+                  {revoked.length ? (
+                    <div className="mt-3 border-t border-border pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setShowRevoked((v) => !v)}
+                        aria-expanded={showRevoked}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-fg"
+                      >
+                        <ChevronRight className={clsx("size-3.5 transition-transform", showRevoked && "rotate-90")} aria-hidden />
+                        Revoked keys ({revoked.length})
+                      </button>
+                      {showRevoked ? (
+                        <ul className="mt-1 divide-y divide-border">
+                          {revoked.map((k) => (
+                            <KeyRow key={k.id} k={k} onChanged={() => void q.mutate()} onError={setError} />
+                          ))}
+                        </ul>
+                      ) : null}
                     </div>
-                    {k.revoked_at ? (
-                      <Badge tone="bad">Revoked {timestamp(k.revoked_at)}</Badge>
-                    ) : confirming === k.id ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-muted">Apps using it will stop reporting.</span>
-                        <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
-                          Cancel
-                        </Button>
-                        <Button size="sm" className="bg-bad text-white hover:opacity-90" onClick={() => void revoke(k.id)}>
-                          Revoke
-                        </Button>
-                      </div>
-                    ) : (
-                      <>
-                        <Badge tone="ok">Active</Badge>
-                        <Button size="sm" variant="danger" onClick={() => setConfirming(k.id)} aria-label={`Revoke key ${k.name}`}>
-                          Revoke
-                        </Button>
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
+                  ) : null}
+                </>
+              );
+            }}
           </DataState>
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+function KeyRow({ k, onChanged, onError }: { k: IngestKey; onChanged: () => void; onError: (msg: string | null) => void }) {
+  const [confirm, setConfirm] = useState<null | "revoke" | "delete">(null);
+  const [busy, setBusy] = useState(false);
+
+  const run = async (fn: () => Promise<unknown>, fallback: string) => {
+    setBusy(true);
+    onError(null);
+    try {
+      await fn();
+      setConfirm(null);
+      onChanged();
+    } catch (err) {
+      onError(errorText(err, fallback));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
+      <div className="min-w-0 flex-1 basis-full sm:basis-0">
+        <p className={clsx("truncate text-sm font-medium", k.revoked_at ? "text-muted" : "text-fg")}>{k.name}</p>
+        <p className="truncate text-xs text-muted">
+          <span className="font-mono">{k.prefix}…</span> · created {timestamp(k.created_at)} · last used {when(k.last_used_at)}
+        </p>
+      </div>
+      {confirm ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted">
+            {confirm === "revoke" ? "Apps using it will stop reporting." : "Removes it from this list for good."}
+          </span>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirm(null)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={busy}
+            onClick={() =>
+              void (confirm === "revoke"
+                ? run(() => revokeKey(k.id), "Couldn't revoke the key.")
+                : run(() => deleteKey(k.id), "Couldn't delete the key."))
+            }
+          >
+            {confirm === "revoke" ? "Revoke" : "Delete"}
+          </Button>
+        </div>
+      ) : k.revoked_at ? (
+        <div className="flex items-center gap-1.5">
+          <Badge tone="bad">Revoked {timestamp(k.revoked_at)}</Badge>
+          <Button size="sm" variant="danger" onClick={() => setConfirm("delete")} aria-label={`Delete key ${k.name}`}>
+            <Trash2 className="size-3.5" aria-hidden /> Delete
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5">
+          <Badge tone="ok">Active</Badge>
+          <Button size="sm" variant="danger" onClick={() => setConfirm("revoke")} aria-label={`Revoke key ${k.name}`}>
+            Revoke
+          </Button>
+        </div>
+      )}
+    </li>
   );
 }
 

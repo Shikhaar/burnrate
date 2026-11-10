@@ -66,7 +66,7 @@ the dashboard:
   (valid 7 days) for the admin to send; the person opens it and sets their own password. The same
   button gives a password-reset link later. Burnrate doesn't send email.
 - **API keys:** create a key per app (shown once, with a copy button), see when each was last used,
-  and revoke it.
+  and revoke it. Revoked keys are tucked under a toggle and can then be deleted for good.
 - **Alerts:** connect Slack (see [Alerts](#alerts)).
 
 | Role | Can |

@@ -232,7 +232,7 @@ export function Button({
   className,
   children,
   ...rest
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger"; size?: "sm" | "md" }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" | "destructive"; size?: "sm" | "md" }) {
   return (
     <button
       type="button"
@@ -243,6 +243,8 @@ export function Button({
         variant === "secondary" && "border border-border bg-surface text-fg hover:bg-surface-2",
         variant === "ghost" && "text-muted hover:bg-surface-2 hover:text-fg",
         variant === "danger" && "text-muted hover:bg-bad-soft hover:text-bad",
+        // Solid red: the final "yes, do it" button for revoke/delete confirmations.
+        variant === "destructive" && "bg-bad text-white hover:opacity-90",
         className,
       )}
       {...rest}

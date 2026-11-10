@@ -144,3 +144,12 @@ def test_keys_from_the_dashboard(client, session):
     assert client.post("/v1/events", json=ingest, headers={"X-API-Key": secret}).status_code == 202
     assert client.post(f"/api/keys/{created['key']['id']}/revoke", headers=ADMIN_TOKEN).json()["key"]["revoked_at"]
     assert client.post("/v1/events", json=ingest, headers={"X-API-Key": secret}).status_code == 401
+
+
+def test_only_revoked_keys_can_be_deleted(client, session):
+    key = client.post("/api/keys", json={"name": "old app"}, headers=ADMIN_TOKEN).json()["key"]
+    assert client.delete(f"/api/keys/{key['id']}", headers=ADMIN_TOKEN).status_code == 409  # still active
+    client.post(f"/api/keys/{key['id']}/revoke", headers=ADMIN_TOKEN)
+    assert client.delete(f"/api/keys/{key['id']}", headers=ADMIN_TOKEN).status_code == 204
+    assert client.get("/api/keys", headers=ADMIN_TOKEN).json()["items"] == []
+    assert client.delete(f"/api/keys/{key['id']}", headers=ADMIN_TOKEN).status_code == 404

@@ -450,6 +450,8 @@ export const useKeys = () => useApi<{ items: IngestKey[] }>("/api/keys");
 export const createKey = (name: string) =>
   request<{ key: IngestKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name }) });
 export const revokeKey = (id: number) => request<{ key: IngestKey }>(`/api/keys/${id}/revoke`, { method: "POST" });
+/** Only revoked keys can be deleted. */
+export const deleteKey = (id: number) => request<void>(`/api/keys/${id}`, { method: "DELETE" });
 
 export interface JiraSettings {
   connected: boolean;
