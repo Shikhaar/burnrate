@@ -42,10 +42,11 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Anomaly detection** | Robust z-score (median/MAD) per project, feature and model. When one problem shows up as several spikes (the same retry loop as a feature, model and project spike), it's reported as one incident. |
 | **Budgets** | Monthly limits company-wide or per project, team, feature or customer, with projected-overrun warnings. |
 | **Coding-agent spend** | Point Claude Code's built-in OpenTelemetry export at Burnrate, and import Cursor and GitHub Copilot spend from their admin APIs, to see coding-tool spend per engineer, model and tool next to production spend. |
-| **Alerts** | Budget and anomaly alerts sent to Slack or any webhook. Deduplicated even when evaluated concurrently, and failed deliveries are retried with backoff (`burnrate alerts` from cron). |
+| **Alerts** | Budget and anomaly alerts posted to Slack (or any Slack-style webhook), connected from Settings with a test message. The API checks every 15 minutes on its own; alerts are deduplicated and failed deliveries retried. |
+| **Team access** | Admin, member and viewer roles. Limit anyone to their own teams and every page, filter and API call shows only those teams' spend. Invite people and manage API keys from Settings. |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
 | **Ingestion** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution) with a LangChain callback handler and Vercel AI SDK middleware, an OTLP/HTTP receiver for OpenTelemetry GenAI spans, and a receiver for Claude Code's telemetry. Nothing sits in your request path. |
-| **Engineering** | Idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, per-key and per-IP rate limiting (shared across replicas via Redis), structured JSON logs with request IDs, Prometheus metrics, Alembic migrations, health checks, and CI that runs against SQLite, Postgres and the full Docker stack. |
+| **Engineering** | Email and password sign-in (scrypt hashes, HttpOnly session cookies, CSRF protection, throttled failed logins), idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, per-key and per-IP rate limiting (shared across replicas via Redis), structured JSON logs with request IDs, Prometheus metrics, Alembic migrations, health checks, and CI that runs against SQLite, Postgres and the full Docker stack. |
 
 ## Screenshots
 
@@ -67,6 +68,14 @@ make seed       # 90 days of demo data into SQLite
 make dev        # API on :8000 (docs at /docs), dashboard on :3000
 make test       # backend + Python SDK tests
 ```
+
+The dashboard is open until you create the first login. After that, everyone has to sign in:
+
+```bash
+cd backend && .venv/bin/burnrate create-user you@company.com --name "Your Name"   # prompts for a password
+```
+
+That first account is an admin. Add everyone else from **Settings → Users**: pick a role and teams, and Burnrate gives you a one-time link to send them.
 
 Stream live traffic through the real SDK while the dashboard is open:
 
@@ -208,16 +217,16 @@ docs/            architecture, event schema, API contract, deployment, demo scri
 
 Burnrate is a complete, tested reference implementation, not yet a hosted service:
 
-- **Verified:** 60 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
-- **Not yet built:** user accounts and multi-tenant organizations (the dashboard API is protected by a single optional token), distributed tracing, and a built-in scheduler for alerts and billing sync (use cron; see [deploy.md](docs/deploy.md)).
+- **Verified:** 78 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
+- **Not yet built:** multi-tenant organizations, SSO, sending email (invite and reset links are copied and sent by the admin), distributed tracing, and a built-in scheduler for billing sync (use cron; see [deploy.md](docs/deploy.md)).
 - **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing, Cursor and GitHub Copilot connectors are tested against sample responses built from the API docs, not yet against the live APIs.
 
 ## Roadmap
 
 - LlamaIndex callbacks
 - More coding agents (Codex, Windsurf), and Copilot premium requests broken down by model
-- Email alerts and per-team routing
-- User accounts, multi-tenant orgs, SSO and role-based access control
+- Email alerts and invites, and per-team alert channels
+- Multi-tenant orgs and SSO
 - Hosted demo
 - OpenTelemetry tracing for Burnrate itself
 - ClickHouse rollups for very high event volumes

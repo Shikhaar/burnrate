@@ -7,9 +7,11 @@ import {
   Flame,
   Lightbulb,
   ListOrdered,
+  LogOut,
   Menu,
   Moon,
   Scale,
+  Settings,
   Sun,
   Tags,
   TrendingUp,
@@ -17,9 +19,10 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { API_URL } from "@/lib/api";
+import { logout, ROLE_LABEL, useMe, usePermissions } from "@/lib/auth";
 import { RANGE_OPTIONS, useDays } from "@/lib/use-days";
 import { Segmented } from "./ui";
 
@@ -32,10 +35,21 @@ const NAV = [
   { href: "/reconciliation", label: "Reconciliation", icon: Scale },
   { href: "/insights", label: "Insights", icon: Lightbulb },
   { href: "/pricing", label: "Pricing", icon: Tags },
+  { href: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
+/** Nav items a role can't use are hidden (the API enforces the same rules). */
+function useNav() {
+  const perms = usePermissions();
+  return NAV.filter(({ href }) => {
+    if (href === "/settings") return perms.isAdmin;
+    if (href === "/reconciliation") return !perms.scoped; // provider bills span every team
+    return true;
+  });
+}
+
 /** Pages whose data does not depend on the reporting window. */
-const RANGELESS = new Set(["/pricing", "/insights", "/budgets", "/requests"]);
+const RANGELESS = new Set(["/pricing", "/insights", "/budgets", "/requests", "/settings"]);
 
 export function Logo({ className }: { className?: string }) {
   return (
@@ -52,9 +66,10 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const days = params.get("days");
+  const nav = useNav();
   return (
     <nav className="flex flex-col gap-0.5" aria-label="Main">
-      {NAV.map(({ href, label, icon: Icon }) => {
+      {nav.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         const to = days ? `${href}?days=${days}` : href;
         return (
@@ -92,7 +107,47 @@ function SidebarFooter() {
           {host}
         </p>
       </div>
-      <p className="px-1 text-[11px] text-subtle">AI spend intelligence</p>
+      <UserMenu />
+    </div>
+  );
+}
+
+function UserMenu() {
+  const { data: me } = useMe();
+  const user = me?.user;
+  if (!user) return <p className="px-1 text-[11px] text-subtle">AI spend intelligence</p>;
+  const signOut = async () => {
+    try {
+      await logout();
+    } finally {
+      // Full reload on purpose: drops every cached response from the signed-out session.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/login");
+    }
+  };
+  return (
+    <div className="flex items-center gap-2 px-1">
+      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-surface-2 text-[11px] font-semibold uppercase text-fg-2" aria-hidden>
+        {(user.name || user.email).slice(0, 1)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[12px] font-medium text-fg" title={user.email}>
+          {user.name || user.email}
+        </p>
+        <p className="truncate text-[11px] text-subtle">
+          {ROLE_LABEL[user.role]}
+          {user.teams ? ` · ${user.teams.join(", ")}` : ""}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={signOut}
+        className="grid size-7 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg"
+        aria-label="Sign out"
+        title="Sign out"
+      >
+        <LogOut className="size-4" aria-hidden />
+      </button>
     </div>
   );
 }
@@ -156,7 +211,35 @@ function currentTitle(pathname: string) {
   return item?.label ?? "Burnrate";
 }
 
+/** The login page renders bare; everything else waits until we know the visitor may see it. */
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  if (pathname === "/login" || pathname === "/invite") return <>{children}</>;
+  return (
+    <AuthGate>
+      <Shell>{children}</Shell>
+    </AuthGate>
+  );
+}
+
+function AuthGate({ children }: { children: ReactNode }) {
+  const { data: me, error } = useMe();
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const signedOut = me?.auth_required && !me.user;
+  useEffect(() => {
+    if (!signedOut) return;
+    const qs = params.toString();
+    router.replace(`/login?next=${encodeURIComponent(pathname + (qs ? `?${qs}` : ""))}`);
+  }, [signedOut, pathname, params, router]);
+  // API unreachable: show the app so each page can render its own "can't reach the API" state.
+  if (error) return <>{children}</>;
+  if (!me || signedOut) return <div className="min-h-dvh bg-bg" aria-busy="true" />;
+  return <>{children}</>;
+}
+
+function Shell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const menuButton = useRef<HTMLButtonElement>(null);

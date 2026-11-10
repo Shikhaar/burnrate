@@ -279,17 +279,34 @@ export function buildPath(path: string, query?: Record<string, QueryValue>): str
   return qs ? `${path}?${qs}` : path;
 }
 
+/** Signed out (or session expired): go to the login page and come back here afterwards. */
+export function redirectToLogin() {
+  if (typeof window === "undefined" || window.location.pathname === "/login") return;
+  const next = window.location.pathname + window.location.search;
+  // Plain navigation: this runs outside React, and a reload also drops responses cached for the old session.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_URL}${path}`;
   let res: Response;
   try {
     res = await fetch(url, {
       ...init,
-      headers: { Accept: "application/json", ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
+      // Send the session cookie; the header lets the API reject cross-site forged writes.
+      credentials: "include",
+      headers: {
+        Accept: "application/json",
+        "X-Requested-With": "burnrate",
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...init?.headers,
+      },
     });
   } catch {
     throw new ApiError(`Can't reach the Burnrate API at ${API_URL}`, 0, url);
   }
+  if (res.status === 401 && !path.startsWith("/api/auth/")) redirectToLogin();
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -371,3 +388,63 @@ export const createBudget = (body: BudgetCreate) =>
 
 export const deleteBudget = (id: Budget["id"]) =>
   request<void>(`/api/budgets/${encodeURIComponent(String(id))}`, { method: "DELETE" });
+
+/* ------------------------------------------------------------------ */
+/* Admin: settings, users, keys                                        */
+/* ------------------------------------------------------------------ */
+
+export interface AlertSettings {
+  connected: boolean;
+  source: "dashboard" | "environment" | null;
+  webhook_hint: string | null;
+  is_slack: boolean | null;
+  timer: { enabled: boolean; interval_minutes: number; last_run_at: string | null; last_run_error: string | null };
+  last_delivered_at: string | null;
+  last_failure: { at: string; error: string; title: string } | null;
+  undelivered: number;
+}
+
+export const useAlertSettings = () => useApi<AlertSettings>("/api/settings/alerts");
+export const saveWebhook = (webhook_url: string) =>
+  request<AlertSettings>("/api/settings/alerts", { method: "PUT", body: JSON.stringify({ webhook_url }) });
+export const disconnectWebhook = () => request<AlertSettings>("/api/settings/alerts", { method: "DELETE" });
+export const sendTestAlert = () => request<{ sent: boolean }>("/api/settings/alerts/test", { method: "POST" });
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  name: string | null;
+  role: "admin" | "member" | "viewer";
+  teams: string[] | null;
+  created_at: string;
+  last_login_at: string | null;
+  disabled: boolean;
+  invite_pending: boolean;
+}
+
+export interface InviteLink {
+  user: AdminUser;
+  invite_path: string;
+  invite_expires_at: string;
+}
+
+export const useUsers = () => useApi<{ items: AdminUser[] }>("/api/users");
+export const inviteUser = (body: { email: string; name?: string; role: string; teams: string[] | null }) =>
+  request<InviteLink>("/api/users", { method: "POST", body: JSON.stringify(body) });
+export const updateUser = (id: number, body: Partial<Pick<AdminUser, "name" | "role" | "teams" | "disabled">>) =>
+  request<{ user: AdminUser }>(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+export const newInviteLink = (id: number) => request<InviteLink>(`/api/users/${id}/invite`, { method: "POST" });
+
+export interface IngestKey {
+  id: number;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export const useKeys = () => useApi<{ items: IngestKey[] }>("/api/keys");
+export const createKey = (name: string) =>
+  request<{ key: IngestKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name }) });
+export const revokeKey = (id: number) => request<{ key: IngestKey }>(`/api/keys/${id}/revoke`, { method: "POST" });

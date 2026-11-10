@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:3000"]
     # Bearer token protecting the dashboard API (/api/*, including budget/alert writes). Empty = open; local demo only.
     dashboard_token: str = ""
+    # Dashboard login (see `burnrate create-user`). Sessions last this many days; set cookie_secure=false only
+    # for plain-http local development. The dashboard and API must share a site (e.g. app.x.com + api.x.com).
+    session_days: int = 14
+    cookie_secure: bool = True
     max_batch_size: int = 1000
     # Logging: "text" for local dev, "json" for production log pipelines.
     log_format: str = "text"
@@ -21,7 +25,9 @@ class Settings(BaseSettings):
     redis_url: str = ""
 
     # Slack-compatible incoming webhook for budget/anomaly alerts (POST {"text": ...}).
-    alert_webhook_url: str = ""
+    alert_webhook_url: str = ""  # fallback; a webhook saved in the dashboard (Settings → Alerts) wins
+    # The API checks budgets and anomalies on its own every N minutes and posts new alerts. 0 = off (use cron).
+    alert_interval_minutes: int = 15
 
     # Provider admin keys used by `burnrate sync` (never the app's inference keys). Only read-only endpoints are
     # called, but the keys can manage the account: give them to the sync job only, not the API service.

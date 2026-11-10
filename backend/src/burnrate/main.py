@@ -6,13 +6,16 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
 from burnrate import __version__
-from burnrate.api import dashboard, ingest
+from burnrate.api import admin, dashboard, ingest
+from burnrate.api import auth as auth_api
+from burnrate.api import settings as settings_api
 from burnrate.config import get_settings
 from burnrate.db import SessionLocal, engine, init_db
 from burnrate.observability import REQUEST_ID_HEADER, RequestContextMiddleware, configure_logging
 from burnrate.pricing import sync_registry
 from burnrate.ratelimit import RateLimitMiddleware
 from burnrate.security import require_dashboard_token
+from burnrate.services.scheduler import alert_timer
 
 
 @asynccontextmanager
@@ -20,7 +23,8 @@ async def lifespan(_: FastAPI):
     init_db()
     with SessionLocal() as session:
         sync_registry(session)
-    yield
+    async with alert_timer(get_settings().alert_interval_minutes):
+        yield
 
 
 def create_app() -> FastAPI:
@@ -48,13 +52,17 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
+        allow_credentials=True,  # the dashboard's session cookie
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[REQUEST_ID_HEADER, "Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
     )
     app.add_middleware(RequestContextMiddleware)
     app.include_router(ingest.router)
+    app.include_router(auth_api.router)
     app.include_router(dashboard.router)
+    app.include_router(settings_api.router)
+    app.include_router(admin.router)
 
     @app.get("/metrics", tags=["ops"], include_in_schema=False, dependencies=[Depends(require_dashboard_token)])
     def metrics() -> Response:

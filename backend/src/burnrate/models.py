@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -38,6 +39,52 @@ class ApiKey(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Updated at most once per LAST_USED_RESOLUTION, so ingest doesn't write on every batch.
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class User(Base):
+    """A dashboard user. Login is required on `/api/*` as soon as any user exists."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True)  # stored lower-cased
+    name: Mapped[str | None] = mapped_column(String(100))
+    # Empty until an invited user sets their password; an empty hash can never match.
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
+    # admin: everything, incl. users, keys and settings · member: data + budgets · viewer: read-only
+    role: Mapped[str] = mapped_column(String(10), default="admin", server_default="admin")
+    # None = every team. A list limits every page to usage events whose `team` is in it.
+    teams: Mapped[list | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UserInvite(Base):
+    """One-time link to set a password: sent to new users, and used for admin-issued password resets."""
+
+    __tablename__ = "user_invites"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class UserSession(Base):
+    """A signed-in browser. Only the SHA-256 of the cookie value is stored."""
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship()
 
 
 class UsageEvent(Base):
@@ -168,3 +215,13 @@ class Alert(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     delivery_error: Mapped[str | None] = mapped_column(String(500))
+
+
+class AppSetting(Base):
+    """Settings changed from the dashboard (e.g. the Slack webhook). Environment variables are the fallback."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

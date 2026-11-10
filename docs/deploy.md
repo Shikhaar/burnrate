@@ -8,6 +8,7 @@ Burnrate is three pieces: a stateless API container, a PostgreSQL database, and 
 git clone https://github.com/Shikhaar/burnrate && cd burnrate
 docker compose up -d --build          # runs `alembic upgrade head` on API start
 docker compose exec api burnrate create-key "prod-ingest"
+docker compose exec api burnrate create-user you@company.com --name "Your Name"   # first dashboard login
 ```
 
 Put a TLS-terminating proxy (Caddy, nginx, a cloud load balancer) in front of `:8000` and `:3000`.
@@ -29,8 +30,11 @@ state lives in Postgres.
 |---|---|
 | `BURNRATE_DATABASE_URL` | `postgresql+psycopg://user:pass@host:5432/burnrate` |
 | `BURNRATE_CORS_ORIGINS` | JSON list of dashboard origins, e.g. `["https://burnrate.your-domain"]` |
-| `BURNRATE_DASHBOARD_TOKEN` | Bearer token required on `/api/*` (strongly recommended outside localhost) |
-| `BURNRATE_ALERT_WEBHOOK_URL` | Slack-compatible incoming webhook |
+| `BURNRATE_DASHBOARD_TOKEN` | Optional bearer token for scripts and automation on `/api/*`; works alongside user logins |
+| `BURNRATE_SESSION_DAYS` | How long a dashboard sign-in lasts (default 14) |
+| `BURNRATE_COOKIE_SECURE` | Default `true`: the session cookie is HTTPS-only. Set `false` only for plain-HTTP testing on a host other than localhost |
+| `BURNRATE_ALERT_WEBHOOK_URL` | Slack-compatible incoming webhook. Optional: admins can connect Slack from Settings instead, which takes priority |
+| `BURNRATE_ALERT_INTERVAL_MINUTES` | How often the API checks for new alerts (default 15; `0` = off, use `burnrate alerts` from cron) |
 | `BURNRATE_LOG_FORMAT` / `BURNRATE_LOG_LEVEL` | `json` for log pipelines (default `text`); level defaults to `INFO` |
 | `BURNRATE_INGEST_RATE_LIMIT_PER_MINUTE` | Requests per minute per ingest API key (default 1200; `0` disables) |
 | `BURNRATE_API_RATE_LIMIT_PER_MINUTE` | Requests per minute per client IP on `/api/*` (default 600; `0` disables) |
@@ -40,6 +44,64 @@ state lives in Postgres.
 | `BURNRATE_GITHUB_TOKEN` / `BURNRATE_GITHUB_ORG` | Token of an org owner or billing manager, and the org; `burnrate sync copilot` imports Copilot spend |
 
 The admin keys are only needed by `burnrate sync`. Leave them off the API service; see below.
+
+## Dashboard logins
+
+The dashboard is open until the first user exists. From then on every page and every `/api/*`
+call needs a signed-in session (or `BURNRATE_DASHBOARD_TOKEN`), including when every user is
+disabled, which locks the dashboard rather than reopening it.
+
+```bash
+burnrate create-user ana@acme.io --name "Ana"     # prompts twice; or pipe it with --password-stdin
+burnrate list-users                              # created, last sign-in, active/disabled
+burnrate reset-password ana@acme.io              # also signs them out everywhere
+burnrate disable-user ana@acme.io                # blocks sign-in and ends their sessions
+burnrate enable-user ana@acme.io
+```
+
+The first user you create is an admin. After that, admins manage everything from **Settings** in
+the dashboard:
+
+- **Users:** add someone with a role and, optionally, a set of teams. Burnrate shows a one-time link
+  (valid 7 days) for the admin to send; the person opens it and sets their own password. The same
+  button gives a password-reset link later. Burnrate doesn't send email.
+- **API keys:** create a key per app (shown once, with a copy button), see when each was last used,
+  and revoke it.
+- **Alerts:** connect Slack (see [Alerts](#alerts)).
+
+| Role | Can |
+|---|---|
+| Admin | Everything, including users, API keys and settings. Always sees every team |
+| Member | See spend, manage budgets, run an alert check |
+| Viewer | See spend; change nothing |
+
+A member or viewer can be limited to some teams. Every page, filter list and `/api/*` response is
+then filtered on the server to usage events whose `team` is one of theirs (events with no team are
+hidden). They can't see reconciliation (provider bills span every team) or the company-wide alert
+history, and can only create budgets for their own teams. The CLI can set both:
+`burnrate create-user pat@acme.io --role viewer --teams search,support`. Existing users become admins
+when you upgrade, and the API refuses to remove or demote the last unrestricted admin.
+
+## Alerts
+
+Admins connect Slack under **Settings → Alerts**: paste an incoming-webhook link and Burnrate posts a
+test message, saving the link only if it arrives. The page shows when alerts were last checked and
+delivered, and the last delivery error if any. A link saved there takes priority over
+`BURNRATE_ALERT_WEBHOOK_URL`.
+
+The API checks budgets and spend spikes itself every `BURNRATE_ALERT_INTERVAL_MINUTES` (default 15).
+Running several API replicas is fine: each condition alerts once, however many check it. Set the
+interval to `0` to turn the timer off and run `burnrate alerts` from cron instead.
+
+Passwords need at least 10 characters and are stored as salted scrypt hashes. Sessions are random
+tokens in an HttpOnly, SameSite=Lax cookie; only their hash is stored. Writes made with the cookie
+must carry `X-Requested-With: burnrate`, which blocks cross-site request forgery. After 10 failed
+sign-ins for one email from one address, that pair is locked out for 15 minutes (counted per API
+replica).
+
+The session cookie belongs to the API's host, so serve the dashboard and API from the **same site**,
+e.g. `burnrate.acme.com` and `api.burnrate.acme.com`, over HTTPS, and list the dashboard origin in
+`BURNRATE_CORS_ORIGINS`. Every signed-in user sees all data; there are no roles yet.
 
 ## Keys and access
 
@@ -110,10 +172,10 @@ logs see the real client IP rather than the proxy's.
 
 ## Scheduled jobs
 
-Run these from cron, a platform scheduler, or a Kubernetes CronJob using the API image:
+Alerts need no scheduler: the API checks on its own (see [Alerts](#alerts)). Run the billing and
+coding-tool sync from cron, a platform scheduler, or a Kubernetes CronJob using the API image:
 
 ```
-*/15 * * * *  burnrate alerts          # budget + anomaly notifications (deduplicated; failed webhooks retried)
 0 6 * * *     burnrate sync all --days 7   # billed costs + Cursor/Copilot usage (configured connectors only)
 ```
 

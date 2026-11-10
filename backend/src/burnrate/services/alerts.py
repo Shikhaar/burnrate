@@ -1,6 +1,7 @@
 """Evaluate budget and anomaly conditions, persist new alerts, and deliver them to a webhook.
 
-Run periodically (`burnrate alerts`, e.g. from cron every 15 minutes). Dedupe keys make it safe
+The API runs this on its own every `BURNRATE_ALERT_INTERVAL_MINUTES` (default 15); `burnrate alerts`
+runs it once, e.g. from cron when the built-in timer is off. Dedupe keys make it safe
 to run as often as you like: a budget alerts once per month per status, an anomaly once per day.
 Failed webhook deliveries are retried with backoff, and again on later runs.
 """
@@ -15,11 +16,10 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from burnrate.config import get_settings
 from burnrate.db import insert_ignoring_conflicts
 from burnrate.metrics import ALERTS_FIRED, WEBHOOK_DELIVERIES
 from burnrate.models import Alert
-from burnrate.services import anomalies, budgets
+from burnrate.services import anomalies, app_settings, budgets
 from burnrate.services.analytics import today
 
 ANOMALY_LOOKBACK_DAYS = 2
@@ -110,7 +110,7 @@ def evaluate(
         for a in fresh:
             ALERTS_FIRED.labels(a.kind, a.severity).inc()
 
-    url = get_settings().alert_webhook_url
+    url, _ = app_settings.webhook_url(session)
     if url:
         pending = list(session.scalars(
             select(Alert)
@@ -141,3 +141,40 @@ def recent(session: Session, days: int = 30) -> list[dict]:
          "delivery_error": a.delivery_error}
         for a in rows
     ]
+
+
+TEST_MESSAGE = (":white_check_mark: *Burnrate is connected.* Budget and spend-spike alerts will be posted "
+                "to this channel.")
+
+
+def send_test(url: str, client: httpx.Client | None = None) -> str | None:
+    """Post a test message. Returns None on success, or a short reason it failed."""
+    owns = client is None
+    http = client or httpx.Client(timeout=10)
+    try:
+        resp = http.post(url, json={"text": TEST_MESSAGE})
+    except httpx.HTTPError as e:
+        return f"Couldn't reach the webhook ({type(e).__name__})."
+    finally:
+        if owns:
+            http.close()
+    if resp.is_success:
+        return None
+    hint = {404: " Slack says this webhook doesn't exist; it may have been removed.",
+            403: " Slack refused it; the app may have been uninstalled from the channel.",
+            410: " Slack says this channel was archived or the webhook was revoked."}.get(resp.status_code, "")
+    return f"The webhook answered HTTP {resp.status_code}.{hint}"
+
+
+def delivery_status(session: Session) -> dict:
+    """Most recent successful delivery and most recent failure, for the settings page."""
+    last_ok = session.scalar(select(Alert.delivered_at).where(Alert.delivered_at.is_not(None))
+                             .order_by(Alert.delivered_at.desc()).limit(1))
+    failed = session.scalars(select(Alert).where(Alert.delivered_at.is_(None), Alert.delivery_error.is_not(None))
+                             .order_by(Alert.created_at.desc()).limit(1)).first()
+    return {
+        "last_delivered_at": last_ok.isoformat() if last_ok else None,
+        "last_failure": ({"at": failed.created_at.isoformat(), "error": failed.delivery_error, "title": failed.title}
+                         if failed else None),
+        "undelivered": session.query(Alert).filter(Alert.delivered_at.is_(None)).count(),
+    }

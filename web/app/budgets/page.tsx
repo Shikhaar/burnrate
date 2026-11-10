@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { BudgetStatusBadge, budgetColor, SeverityBadge } from "@/components/severity";
 import { Button, Card, CardBody, CardHeader, DataState, EmptyState, PageHeader, Skeleton, TableSkeleton } from "@/components/ui";
 import { ApiError, createBudget, deleteBudget, DIMENSIONS, evaluateAlerts, useAlerts, useBudgets, useMeta, type Budget, type Dimension, type Meta } from "@/lib/api";
+import { usePermissions } from "@/lib/auth";
 import { monthLabel, share, timestamp, usd, usdCompact } from "@/lib/format";
 
 const META_KEY: Partial<Record<Dimension, keyof Meta>> = {
@@ -19,6 +20,7 @@ const META_KEY: Partial<Record<Dimension, keyof Meta>> = {
 
 export default function BudgetsPage() {
   const budgets = useBudgets();
+  const perms = usePermissions();
   const [showForm, setShowForm] = useState(false);
 
   const items = budgets.data?.items ?? [];
@@ -31,15 +33,18 @@ export default function BudgetsPage() {
         title="Budgets"
         description={`Monthly spend limits · ${monthLabel(new Date().toISOString().slice(0, 7))}${items.length ? ` · ${items.length} budgets${atRisk ? `, ${atRisk} need attention` : ""}` : ""}${totalLimit ? ` · ${usdCompact(totalLimit)} global limit` : ""}`}
         actions={
-          <Button variant={showForm ? "secondary" : "primary"} onClick={() => setShowForm((v) => !v)}>
-            {showForm ? <X className="size-4" aria-hidden /> : <Plus className="size-4" aria-hidden />}
-            {showForm ? "Cancel" : "New budget"}
-          </Button>
+          perms.canEdit ? (
+            <Button variant={showForm ? "secondary" : "primary"} onClick={() => setShowForm((v) => !v)}>
+              {showForm ? <X className="size-4" aria-hidden /> : <Plus className="size-4" aria-hidden />}
+              {showForm ? "Cancel" : "New budget"}
+            </Button>
+          ) : undefined
         }
       />
 
       {showForm ? (
         <BudgetForm
+          teams={perms.teams}
           onCreated={async () => {
             setShowForm(false);
             await budgets.mutate();
@@ -67,9 +72,13 @@ export default function BudgetsPage() {
             <EmptyState
               icon={<Wallet className="size-5" aria-hidden />}
               title="No budgets yet"
-              description="Create a monthly budget for your whole org or scope it to a provider, project, team or feature."
+              description={
+                perms.scoped
+                  ? "No budgets for your teams yet."
+                  : "Create a monthly budget for your whole org or scope it to a provider, project, team or feature."
+              }
               action={
-                !showForm ? (
+                !showForm && perms.canEdit ? (
                   <Button variant="primary" className="mt-2" onClick={() => setShowForm(true)}>
                     <Plus className="size-4" aria-hidden /> New budget
                   </Button>
@@ -84,18 +93,19 @@ export default function BudgetsPage() {
             {[...d.items]
               .sort((a, b) => b.utilization - a.utilization)
               .map((b) => (
-                <BudgetCard key={b.id} budget={b} onDeleted={() => void budgets.mutate()} />
+                <BudgetCard key={b.id} budget={b} canEdit={perms.canEdit} onDeleted={() => void budgets.mutate()} />
               ))}
           </div>
         )}
       </DataState>
 
-      <AlertHistory onEvaluated={() => void budgets.mutate()} />
+      {/* Alerts cover every team, so team-limited users don't see them. */}
+      {perms.ready && !perms.scoped ? <AlertHistory canEdit={perms.canEdit} onEvaluated={() => void budgets.mutate()} /> : null}
     </>
   );
 }
 
-function AlertHistory({ onEvaluated }: { onEvaluated: () => void }) {
+function AlertHistory({ onEvaluated, canEdit }: { onEvaluated: () => void; canEdit: boolean }) {
   const q = useAlerts(30);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -121,9 +131,11 @@ function AlertHistory({ onEvaluated }: { onEvaluated: () => void }) {
         actions={
           <>
             {msg ? <span className="text-xs text-muted">{msg}</span> : null}
-            <Button size="sm" onClick={evaluate} disabled={busy}>
-              <BellRing className="size-3.5" aria-hidden /> {busy ? "Evaluating…" : "Evaluate now"}
-            </Button>
+            {canEdit ? (
+              <Button size="sm" onClick={evaluate} disabled={busy}>
+                <BellRing className="size-3.5" aria-hidden /> {busy ? "Evaluating…" : "Evaluate now"}
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -178,7 +190,7 @@ function AlertSeverity({ severity }: { severity: string }) {
   return <SeverityBadge severity="low" />;
 }
 
-function BudgetCard({ budget: b, onDeleted }: { budget: Budget; onDeleted: () => void }) {
+function BudgetCard({ budget: b, onDeleted, canEdit }: { budget: Budget; onDeleted: () => void; canEdit: boolean }) {
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -276,11 +288,11 @@ function BudgetCard({ budget: b, onDeleted }: { budget: Budget; onDeleted: () =>
               {busy ? "Deleting…" : "Delete"}
             </Button>
           </>
-        ) : (
+        ) : canEdit ? (
           <Button size="sm" variant="danger" onClick={() => setConfirm(true)} aria-label={`Delete budget ${b.name}`}>
             <Trash2 className="size-3.5" aria-hidden /> Delete
           </Button>
-        )}
+        ) : null}
       </div>
     </Card>
   );
@@ -299,10 +311,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function BudgetForm({ onCreated }: { onCreated: () => Promise<void> | void }) {
+function BudgetForm({ onCreated, teams }: { onCreated: () => Promise<void> | void; teams: string[] | null }) {
   const meta = useMeta();
   const [name, setName] = useState("");
-  const [dim, setDim] = useState<Dimension | "">("");
+  // Team-limited users can only budget for their own teams.
+  const [dim, setDim] = useState<Dimension | "">(teams ? "team" : "");
   const [value, setValue] = useState("");
   const [limit, setLimit] = useState("");
   const [threshold, setThreshold] = useState("80");
@@ -357,8 +370,8 @@ function BudgetForm({ onCreated }: { onCreated: () => Promise<void> | void }) {
                 setValue("");
               }}
             >
-              <option value="">All spend</option>
-              {DIMENSIONS.map((d) => (
+              {teams ? null : <option value="">All spend</option>}
+              {(teams ? (["team"] as Dimension[]) : DIMENSIONS).map((d) => (
                 <option key={d} value={d}>
                   {d[0].toUpperCase() + d.slice(1)}
                 </option>

@@ -10,7 +10,7 @@ seed:
 	cd backend && .venv/bin/burnrate seed
 
 api:
-	cd backend && .venv/bin/uvicorn burnrate.main:app --reload --port 8000
+	cd backend && BURNRATE_COOKIE_SECURE=false .venv/bin/uvicorn burnrate.main:app --reload --port 8000  # plain-http dev: not every browser accepts Secure cookies on localhost
 
 web:
 	cd web && pnpm dev
