@@ -198,7 +198,10 @@ function AlertsTab() {
               Open <b>Incoming Webhooks</b>, switch it on, then <b>Add New Webhook to Workspace</b>.
             </li>
             <li>Pick the channel for alerts, for example #ai-spend.</li>
-            <li>Copy the link Slack shows and paste it here. Treat it like a password: anyone with it can post to that channel.</li>
+            <li>
+              Copy the link Slack shows. Paste it into the <b>Slack webhook link</b> box in the Slack alerts section and click <b>Connect</b>.
+              Treat the link like a password: anyone with it can post to that channel.
+            </li>
           </ol>
           <p className="mt-3 text-xs text-muted">Teams, Discord and other tools that accept Slack-style webhooks work too.</p>
         </CardBody>
