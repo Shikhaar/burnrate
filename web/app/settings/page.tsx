@@ -1,13 +1,16 @@
 "use client";
 
 import clsx from "clsx";
-import { BellRing, Check, Copy, KeyRound, Link2, Plus, Send, Unplug, UserPlus, Users, X } from "lucide-react";
+import { BellRing, Check, Copy, ExternalLink, KeyRound, Link2, Plus, Send, Ticket, Unplug, UserPlus, Users, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Badge, Button, Card, CardBody, CardHeader, DataState, EmptyState, PageHeader, Segmented, TableSkeleton } from "@/components/ui";
 import {
   ApiError,
+  connectJira,
+  createJiraTestTicket,
   createKey,
+  disconnectJira,
   disconnectWebhook,
   inviteUser,
   newInviteLink,
@@ -16,6 +19,7 @@ import {
   sendTestAlert,
   updateUser,
   useAlertSettings,
+  useJiraSettings,
   useKeys,
   useMeta,
   useUsers,
@@ -75,9 +79,18 @@ export default function SettingsPage() {
   );
 }
 
-/* ---------------- Alerts (Slack) ---------------- */
+/* ---------------- Alerts (Slack, Jira) ---------------- */
 
 function AlertsTab() {
+  return (
+    <div className="space-y-4">
+      <SlackSection />
+      <JiraSection />
+    </div>
+  );
+}
+
+function SlackSection() {
   const q = useAlertSettings();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState<null | "save" | "test" | "remove">(null);
@@ -207,6 +220,202 @@ function AlertsTab() {
         </CardBody>
       </Card>
     </div>
+  );
+}
+
+function JiraSection() {
+  const q = useJiraSettings();
+  const s = q.data;
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ site: "", email: "", api_token: "", project_key: "", issue_type: "Task", min_severity: "high" as "high" | "medium" });
+  const [busy, setBusy] = useState<null | "save" | "test" | "remove">(null);
+  const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: ReactNode } | null>(null);
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const startEdit = () => {
+    if (s?.connected) {
+      setForm({ site: s.site ?? "", email: s.email ?? "", api_token: "", project_key: s.project_key ?? "", issue_type: s.issue_type ?? "Task", min_severity: s.min_severity });
+    }
+    setMsg(null);
+    setEditing(true);
+  };
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy("save");
+    setMsg(null);
+    try {
+      const r = await connectJira({ ...form, api_token: form.api_token || null });
+      await q.mutate();
+      setEditing(false);
+      setForm((f) => ({ ...f, api_token: "" }));
+      setMsg({ tone: "ok", text: `Connected to ${r.verified.project_name ?? r.project_key} as ${r.verified.account ?? r.email}. Nothing was created.` });
+    } catch (err) {
+      setMsg({ tone: "bad", text: errorText(err, "Couldn't connect to Jira.") });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const testTicket = async () => {
+    setBusy("test");
+    setMsg(null);
+    try {
+      const r = await createJiraTestTicket();
+      setMsg({ tone: "ok", text: <>Created <a className="underline" href={r.url} target="_blank" rel="noreferrer">{r.key}</a>. You can delete it in Jira.</> });
+    } catch (err) {
+      setMsg({ tone: "bad", text: errorText(err, "Couldn't create a ticket.") });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async () => {
+    setBusy("remove");
+    try {
+      await disconnectJira();
+      await q.mutate();
+      setMsg({ tone: "ok", text: "Disconnected. No more tickets will be created." });
+    } catch (err) {
+      setMsg({ tone: "bad", text: errorText(err, "Couldn't disconnect.") });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const showForm = editing || (s && !s.connected);
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <Card>
+        <CardHeader title="Jira tickets" description="Burnrate files a ticket for serious alerts, one per problem, so someone owns the fix." />
+        <CardBody>
+          <DataState query={q} loading={<TableSkeleton rows={2} cols={2} />}>
+            {(s) => (
+              <div className="space-y-5">
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-2/40 p-3">
+                  <Ticket className={clsx("size-5", s.connected ? "text-ok" : "text-subtle")} aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-fg">{s.connected ? `Connected to project ${s.project_key}` : "Not connected"}</p>
+                    <p className="truncate text-xs text-muted">
+                      {s.connected
+                        ? `${s.site?.replace("https://", "")} · as ${s.email} · token ${s.token_hint} · ${s.issue_type} tickets`
+                        : "Alerts won't create Jira tickets."}
+                    </p>
+                  </div>
+                  {s.connected && !editing ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" disabled={busy !== null} onClick={() => void testTicket()}>
+                        <Send className="size-3.5" aria-hidden /> {busy === "test" ? "Creating…" : "Create test ticket"}
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={busy !== null} onClick={startEdit}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="danger" disabled={busy !== null} onClick={() => void remove()}>
+                        <Unplug className="size-3.5" aria-hidden /> Disconnect
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+
+                {showForm ? (
+                  <form onSubmit={save} className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Labeled label="Jira address">
+                        <input className={inputCls} value={form.site} onChange={set("site")} placeholder="acme.atlassian.net" autoComplete="off" spellCheck={false} />
+                      </Labeled>
+                      <Labeled label="Jira account email">
+                        <input className={inputCls} type="email" value={form.email} onChange={set("email")} placeholder="burnrate-bot@acme.com" autoComplete="off" />
+                      </Labeled>
+                      <Labeled label={s.connected ? "API token (leave empty to keep the current one)" : "API token"}>
+                        <input className={clsx(inputCls, "font-mono")} type="password" value={form.api_token} onChange={set("api_token")} autoComplete="new-password" />
+                      </Labeled>
+                      <Labeled label="Project key">
+                        <input className={clsx(inputCls, "uppercase")} value={form.project_key} onChange={set("project_key")} placeholder="OPS" maxLength={20} />
+                      </Labeled>
+                      <Labeled label="Ticket type">
+                        <input className={inputCls} value={form.issue_type} onChange={set("issue_type")} placeholder="Task" maxLength={60} />
+                      </Labeled>
+                      <Labeled label="Which alerts become tickets">
+                        <select className={inputCls} value={form.min_severity} onChange={set("min_severity")}>
+                          <option value="high">Only serious ones (budget exceeded, big spikes)</option>
+                          <option value="medium">Serious and warnings (also budgets at risk)</option>
+                        </select>
+                      </Labeled>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="submit" variant="primary" disabled={busy !== null || !form.site || !form.email || !form.project_key || (!s.connected && !form.api_token)}>
+                        {busy === "save" ? "Checking…" : s.connected ? "Save" : "Connect"}
+                      </Button>
+                      {editing ? (
+                        <Button variant="ghost" onClick={() => setEditing(false)}>
+                          Cancel
+                        </Button>
+                      ) : null}
+                      <p className="text-xs text-muted">Burnrate checks the login, project and ticket type before saving. It doesn&apos;t create anything.</p>
+                    </div>
+                  </form>
+                ) : null}
+
+                {msg ? (
+                  <p role="status" className={clsx("rounded-lg px-3 py-2 text-sm", msg.tone === "ok" ? "bg-ok-soft text-ok" : "bg-bad-soft text-bad")}>
+                    {msg.text}
+                  </p>
+                ) : null}
+
+                {s.connected ? (
+                  <dl className="grid grid-cols-1 gap-3 border-t border-border pt-4 text-sm sm:grid-cols-2">
+                    <Stat label="Creates tickets for">{s.min_severity === "high" ? "Serious alerts only" : "Serious alerts and warnings"}</Stat>
+                    <Stat label="Last ticket">
+                      {s.last_ticket ? (
+                        <a className="inline-flex items-center gap-1 text-accent hover:underline" href={s.last_ticket.url ?? "#"} target="_blank" rel="noreferrer">
+                          {s.last_ticket.key} <ExternalLink className="size-3" aria-hidden />
+                        </a>
+                      ) : (
+                        "None yet"
+                      )}
+                    </Stat>
+                  </dl>
+                ) : null}
+                {s.last_failure ? <Problem title={`Couldn't file “${s.last_failure.title}”`}>{s.last_failure.error}</Problem> : null}
+              </div>
+            )}
+          </DataState>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Get a Jira API token" description="About five minutes, done once." />
+        <CardBody>
+          <ol className="list-decimal space-y-2 pl-5 text-sm text-fg-2">
+            <li>
+              Best: create a Jira user just for Burnrate (e.g. burnrate-bot@yourcompany.com) that can only <b>create issues</b> in the project
+              you&apos;ll use. The token can do whatever that user can.
+            </li>
+            <li>
+              Signed in as that user, open <span className="font-mono text-xs">id.atlassian.com/manage-profile/security/api-tokens</span> and
+              choose <b>Create API token</b>.
+            </li>
+            <li>
+              Copy the token and paste it into the <b>API token</b> box in the Jira tickets section, with that user&apos;s email, your Jira address
+              and the project key (the letters before ticket numbers, like <b>OPS</b> in OPS-12).
+            </li>
+            <li>
+              Click <b>Connect</b>, then <b>Create test ticket</b> to see where alerts will land.
+            </li>
+          </ol>
+          <p className="mt-3 text-xs text-muted">The token is stored on the Burnrate server and never shown again; only its last four characters are.</p>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+function Labeled({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="text-xs font-medium text-fg-2">{label}</span>
+      {children}
+    </label>
   );
 }
 

@@ -237,6 +237,8 @@ export interface Alert {
   created_at: string;
   delivered: boolean;
   delivery_error: string | null;
+  jira_issue_key?: string | null;
+  jira_url?: string | null;
 }
 
 export interface AlertsResponse {
@@ -448,3 +450,31 @@ export const useKeys = () => useApi<{ items: IngestKey[] }>("/api/keys");
 export const createKey = (name: string) =>
   request<{ key: IngestKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name }) });
 export const revokeKey = (id: number) => request<{ key: IngestKey }>(`/api/keys/${id}/revoke`, { method: "POST" });
+
+export interface JiraSettings {
+  connected: boolean;
+  site: string | null;
+  email: string | null;
+  token_hint: string | null;
+  project_key: string | null;
+  issue_type: string | null;
+  min_severity: "high" | "medium";
+  last_ticket: { key: string; url: string | null; title: string } | null;
+  last_failure: { error: string; title: string } | null;
+}
+
+export const useJiraSettings = () => useApi<JiraSettings>("/api/settings/jira");
+export const connectJira = (body: {
+  site: string;
+  email: string;
+  api_token: string | null;
+  project_key: string;
+  issue_type: string;
+  min_severity: "high" | "medium";
+}) =>
+  request<JiraSettings & { verified: { account: string | null; project_name: string | null; issue_types: string[] } }>(
+    "/api/settings/jira",
+    { method: "PUT", body: JSON.stringify(body) },
+  );
+export const disconnectJira = () => request<JiraSettings>("/api/settings/jira", { method: "DELETE" });
+export const createJiraTestTicket = () => request<{ key: string; url: string }>("/api/settings/jira/test", { method: "POST" });

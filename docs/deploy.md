@@ -93,6 +93,18 @@ The API checks budgets and spend spikes itself every `BURNRATE_ALERT_INTERVAL_MI
 Running several API replicas is fine: each condition alerts once, however many check it. Set the
 interval to `0` to turn the timer off and run `burnrate alerts` from cron instead.
 
+**Jira.** Under the same page, admins can also have alerts filed as Jira tickets: enter the Jira
+address, an account email and [API token](https://id.atlassian.com/manage-profile/security/api-tokens),
+the project key and the ticket type. Burnrate checks the login, project and ticket type before
+saving, without creating anything; **Create test ticket** files one on purpose. By default only
+serious alerts (budget exceeded, high-severity spikes) become tickets; you can include warnings too.
+Each alert files at most one ticket, even with several API replicas, and failed attempts are retried
+on later checks (up to 5). Tickets are labelled `burnrate` and `burnrate-budget` or `burnrate-anomaly`.
+
+The token acts as the Jira user who created it, so create a dedicated bot user that can only create
+issues in that project. The Slack link and Jira token are stored in Burnrate's database (never sent
+back to the browser), so protect database access and backups like any other secret store.
+
 Passwords need at least 10 characters and are stored as salted scrypt hashes. Sessions are random
 tokens in an HttpOnly, SameSite=Lax cookie; only their hash is stored. Writes made with the cookie
 must carry `X-Requested-With: burnrate`, which blocks cross-site request forgery. After 10 failed

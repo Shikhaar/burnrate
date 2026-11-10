@@ -172,6 +172,14 @@ function AlertHistory({ onEvaluated, canEdit }: { onEvaluated: () => void; canEd
                       ) : (
                         <span className="text-subtle">Not delivered</span>
                       )}
+                      {a.jira_issue_key ? (
+                        <>
+                          {" · "}
+                          <a className="text-accent hover:underline" href={a.jira_url ?? "#"} target="_blank" rel="noreferrer">
+                            {a.jira_issue_key}
+                          </a>
+                        </>
+                      ) : null}
                     </p>
                   </div>
                 </li>

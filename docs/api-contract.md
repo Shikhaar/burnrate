@@ -24,7 +24,7 @@ Auth: once any user exists, `/api/*` needs the `burnrate_session` cookie (send w
 | POST | `/api/budgets` | body `{name, scope_dimension|null, scope_value|null, monthly_limit_usd, alert_threshold}` → budget object |
 | DELETE | `/api/budgets/{id}` | 204 |
 | GET | `/api/insights` | `{items:[{id,kind,title,detail,estimated_monthly_savings_usd,scope}]}` |
-| GET | `/api/alerts?days=30` | `{items:[{id,kind:"budget"|"anomaly",severity,title,detail,created_at,delivered,delivery_error}]}` |
+| GET | `/api/alerts?days=30` | `{items:[{id,kind:"budget"|"anomaly",severity,title,detail,created_at,delivered,delivery_error,jira_issue_key,jira_url}]}` |
 | POST | `/api/alerts/evaluate` | `{fired}` — check now (the API also checks every 15 minutes on its own) |
 | GET | `/api/pricing` | `{items:[{provider,model,input_per_mtok,output_per_mtok,cached_input_per_mtok,cache_write_per_mtok,effective_from}]}` |
 
@@ -44,6 +44,10 @@ scoped to `team=<one of theirs>`.
 | PUT | `/api/settings/alerts` | body `{webhook_url}` (https). Posts a test message first; `400` with the reason if it doesn't arrive, else saves and returns the status |
 | DELETE | `/api/settings/alerts` | removes the dashboard webhook; returns the status |
 | POST | `/api/settings/alerts/test` | `{sent:true}`, `400` with the reason, or `409` if nothing is connected |
+| GET | `/api/settings/jira` | `{connected, site, email, token_hint, project_key, issue_type, min_severity:"high"|"medium", last_ticket:{key,url,title}|null, last_failure:{error,title}|null}` |
+| PUT | `/api/settings/jira` | body `{site, email, api_token?, project_key, issue_type, min_severity}`; omit `api_token` to keep the saved one. Checks login, project and type first (`400` with the reason), then saves → status + `verified:{account,project_name,issue_types}` |
+| DELETE | `/api/settings/jira` | disconnects; returns the status |
+| POST | `/api/settings/jira/test` | creates one test ticket → `{key, url}` |
 | GET | `/api/users` | `{items:[{id,email,name,role,teams,created_at,last_login_at,disabled,invite_pending}]}` |
 | POST | `/api/users` | body `{email,name?,role,teams|null}` → `{user, invite_path, invite_expires_at}` |
 | PATCH | `/api/users/{id}` | body any of `{name,role,teams,disabled}` → `{user}`; `409` for changes that would remove the last admin or lock yourself out |

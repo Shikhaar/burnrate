@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -9,7 +12,7 @@ from sqlalchemy.orm import Session
 from burnrate.auth import require_admin
 from burnrate.config import get_settings
 from burnrate.db import get_session
-from burnrate.services import alerts, app_settings
+from burnrate.services import alerts, app_settings, jira
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_admin)])
 
@@ -68,3 +71,60 @@ def test_webhook(session: Session = Depends(get_session)) -> dict:
     if problem:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, problem)
     return {"sent": True}
+
+
+# ---- Jira -------------------------------------------------------------------------------------------------
+class JiraIn(BaseModel):
+    site: str = Field(..., min_length=3, max_length=200)
+    email: str = Field(..., min_length=3, max_length=254)
+    # Optional when editing a saved connection: leave it out to keep the current token.
+    api_token: str | None = Field(None, min_length=1, max_length=500)
+    project_key: str = Field(..., min_length=1, max_length=20)
+    issue_type: str = Field("Task", min_length=1, max_length=60)
+    min_severity: Literal["high", "medium"] = "high"
+
+
+@router.get("/jira")
+def get_jira(session: Session = Depends(get_session)) -> dict:
+    return jira.status(session)
+
+
+@router.put("/jira")
+def save_jira(body: JiraIn, session: Session = Depends(get_session)) -> dict:
+    """Save only after Jira confirms the login, project and issue type (nothing is created)."""
+    existing = jira.load(session)
+    token = body.api_token or (existing.api_token if existing else None)
+    if not token:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Paste a Jira API token.")
+    try:
+        cfg = jira.JiraConfig(site=jira.normalize_site(body.site), email=body.email.strip(), api_token=token.strip(),
+                              project_key=body.project_key.strip().upper(), issue_type=body.issue_type.strip(),
+                              min_severity=body.min_severity)
+        with httpx.Client(timeout=15) as http:
+            found = jira.verify(cfg, http)
+    except jira.JiraError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    jira.save(session, cfg)
+    return {**jira.status(session), "verified": found}
+
+
+@router.delete("/jira")
+def disconnect_jira(session: Session = Depends(get_session)) -> dict:
+    jira.clear(session)
+    return jira.status(session)
+
+
+@router.post("/jira/test")
+def jira_test_ticket(session: Session = Depends(get_session)) -> dict:
+    """Create one real ticket so the admin can see where alerts will land."""
+    cfg = jira.load(session)
+    if cfg is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Connect Jira first.")
+    try:
+        with httpx.Client(timeout=15) as http:
+            key = jira.create_issue(cfg, http, "[Burnrate] Test ticket: safe to delete",
+                                    "Burnrate is connected. Alerts will be filed in this project.",
+                                    labels=("burnrate-test",))
+    except jira.JiraError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    return {"key": key, "url": cfg.issue_url(key)}

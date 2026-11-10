@@ -215,6 +215,10 @@ class Alert(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     delivery_error: Mapped[str | None] = mapped_column(String(500))
+    # Jira ticket created for this alert (independent of the webhook delivery above).
+    jira_issue_key: Mapped[str | None] = mapped_column(String(50))
+    jira_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    jira_error: Mapped[str | None] = mapped_column(String(500))
 
 
 class AppSetting(Base):

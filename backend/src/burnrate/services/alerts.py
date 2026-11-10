@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from burnrate.db import insert_ignoring_conflicts
 from burnrate.metrics import ALERTS_FIRED, WEBHOOK_DELIVERIES
 from burnrate.models import Alert
-from burnrate.services import anomalies, app_settings, budgets
+from burnrate.services import anomalies, app_settings, budgets, jira
 from burnrate.services.analytics import today
 
 ANOMALY_LOOKBACK_DAYS = 2
@@ -129,16 +129,27 @@ def evaluate(
             finally:
                 if owns_client:
                     http.close()
+
+    # Jira is independent of the webhook: an alert can reach Slack, Jira, both or neither.
+    if jira.load(session) is not None:
+        jira.deliver_pending(session, list(session.scalars(
+            select(Alert)
+            .where(Alert.jira_issue_key.is_(None), Alert.jira_attempts < jira.MAX_ATTEMPTS,
+                   Alert.created_at >= datetime.now(UTC) - RETRY_WINDOW)
+            .order_by(Alert.id)
+        )))
     return fresh
 
 
 def recent(session: Session, days: int = 30) -> list[dict]:
     since = datetime.now(UTC) - timedelta(days=days)
+    cfg = jira.load(session)
     rows = session.scalars(select(Alert).where(Alert.created_at >= since).order_by(Alert.created_at.desc()))
     return [
         {"id": a.id, "kind": a.kind, "severity": a.severity, "title": a.title, "detail": a.detail,
          "created_at": a.created_at.isoformat(), "delivered": a.delivered_at is not None,
-         "delivery_error": a.delivery_error}
+         "delivery_error": a.delivery_error, "jira_issue_key": a.jira_issue_key,
+         "jira_url": cfg.issue_url(a.jira_issue_key) if cfg and a.jira_issue_key else None}
         for a in rows
     ]
 
