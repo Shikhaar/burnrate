@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     api_rate_limit_per_minute: int = 600  # per client IP on the dashboard API
     # Share rate limits across API replicas, e.g. redis://redis:6379/0. Empty = per-process limits.
     redis_url: str = ""
+    # Comma-separated list of trusted reverse proxy IPs (e.g. "127.0.0.1,10.0.0.1").
+    # When set and the direct connection matches, X-Forwarded-For is trusted for client IP recording.
+    trusted_proxies: str = ""
 
     # Slack-compatible incoming webhook for budget/anomaly alerts (POST {"text": ...}).
     alert_webhook_url: str = ""  # fallback; a webhook saved in the dashboard (Settings → Alerts) wins

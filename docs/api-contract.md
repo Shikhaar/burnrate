@@ -56,3 +56,4 @@ scoped to `team=<one of theirs>`.
 | POST | `/api/keys` | body `{name}` → `{key, secret}`; `secret` is the full key, returned only here |
 | POST | `/api/keys/{id}/revoke` | `{key}` |
 | DELETE | `/api/keys/{id}` | `204`; only revoked keys (`409` for an active one: revoke it first) |
+| GET | `/api/audit-logs?limit=50&offset=0&action=&actor=&days=30` | `{total, items:[{id,timestamp,actor_type:"user"|"cli"|"token"|"anonymous"|"system",actor_id,actor_email,action,target_type,target_id,details,ip_address}]}`. `action` and `actor` match substrings. Read-only: there's no way to edit or delete entries |

@@ -1,9 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import { BellRing, Check, ChevronRight, Copy, ExternalLink, KeyRound, Link2, Plus, Send, Ticket, Trash2, Unplug, UserPlus, Users, X } from "lucide-react";
+import { BellRing, Check, ChevronDown, ChevronRight, Copy, ExternalLink, KeyRound, Link2, Plus, Send, Ticket, Trash2, Unplug, UserPlus, Users, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Badge, Button, Card, CardBody, CardHeader, DataState, EmptyState, PageHeader, Segmented, TableSkeleton } from "@/components/ui";
 import {
   ApiError,
@@ -20,11 +20,13 @@ import {
   sendTestAlert,
   updateUser,
   useAlertSettings,
+  useAuditLogs,
   useJiraSettings,
   useKeys,
   useMeta,
   useUsers,
   type AdminUser,
+  type AuditLogEntry,
   type IngestKey,
   type InviteLink,
 } from "@/lib/api";
@@ -35,6 +37,7 @@ const TABS = [
   { value: "alerts", label: "Alerts" },
   { value: "users", label: "Users" },
   { value: "keys", label: "API keys" },
+  { value: "audit", label: "Audit log" },
 ] as const;
 type Tab = (typeof TABS)[number]["value"];
 
@@ -76,7 +79,7 @@ export default function SettingsPage() {
           />
         }
       />
-      {tab === "alerts" ? <AlertsTab /> : tab === "users" ? <UsersTab /> : <KeysTab />}
+      {tab === "alerts" ? <AlertsTab /> : tab === "users" ? <UsersTab /> : tab === "keys" ? <KeysTab /> : <AuditLogTab />}
     </>
   );
 }
@@ -912,5 +915,188 @@ function OneTimeSecret({ title, description, secret, onClose }: { title: string;
         </div>
       </CardBody>
     </Card>
+  );
+}
+
+/* ---------------- Audit log ---------------- */
+
+const PAGE = 50;
+
+/** Plain-language names for the actions Burnrate records; anything else shows its code. */
+const ACTION_LABEL: Record<string, string> = {
+  "auth.login.success": "Signed in",
+  "auth.login.failed": "Failed sign-in",
+  "auth.login.failed.capped": "Many failed sign-ins (stopped recording)",
+  "auth.logout": "Signed out",
+  "auth.invite.accepted": "Set password from link",
+  "user.create": "Added person",
+  "user.update": "Changed person",
+  "user.invite.renew": "New invite or reset link",
+  "user.password.reset": "Reset password",
+  "user.disable": "Disabled person",
+  "user.enable": "Enabled person",
+  "key.create": "Created API key",
+  "key.revoke": "Revoked API key",
+  "key.delete": "Deleted API key",
+  "budget.create": "Created budget",
+  "budget.delete": "Deleted budget",
+  "settings.slack.update": "Connected Slack",
+  "settings.slack.delete": "Disconnected Slack",
+  "settings.jira.update": "Connected Jira",
+  "settings.jira.delete": "Disconnected Jira",
+  "settings.jira.test_ticket": "Created Jira test ticket",
+};
+
+const ACTOR_LABEL: Record<string, string> = {
+  user: "Signed-in user",
+  cli: "Server command",
+  token: "Dashboard token",
+  anonymous: "Not signed in",
+  system: "Burnrate",
+};
+
+function actionTone(action: string): "ok" | "bad" | "warn" | "accent" | "neutral" {
+  if (action.startsWith("auth.login.failed")) return "warn";
+  if (/delete|revoke|disable/.test(action)) return "bad";
+  if (/create|enable|success|accepted/.test(action)) return "ok";
+  if (/update|renew|reset/.test(action)) return "accent";
+  return "neutral";
+}
+
+function initials(entry: AuditLogEntry): string {
+  if (entry.actor_type === "cli") return ">_";
+  if (entry.actor_type !== "user" && entry.actor_type !== "anonymous") return "BR";
+  const clean = entry.actor_email.split("@")[0].replace(/[^a-zA-Z0-9]/g, "");
+  return clean ? clean.slice(0, 2).toUpperCase() : "?";
+}
+
+/** Waits until typing pauses, so each keystroke isn't a request. */
+function useDebounced<T>(value: T, ms = 300): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+function AuditLogTab() {
+  const [actionInput, setActionInput] = useState("");
+  const [actorInput, setActorInput] = useState("");
+  const action = useDebounced(actionInput.trim());
+  const actor = useDebounced(actorInput.trim());
+  const [page, setPage] = useState(0);
+  const [open, setOpen] = useState<number | null>(null);
+
+  // New filters start from the first page (adjusted during render, not in an effect).
+  const [lastFilter, setLastFilter] = useState("");
+  if (lastFilter !== `${action}|${actor}`) {
+    setLastFilter(`${action}|${actor}`);
+    setPage(0);
+  }
+
+  const q = useAuditLogs({ action: action || undefined, actor: actor || undefined, days: 90, limit: PAGE, offset: page * PAGE });
+  const total = q.data?.total ?? 0;
+  const from = total ? page * PAGE + 1 : 0;
+  const to = Math.min(total, (page + 1) * PAGE);
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader
+          title="Audit log"
+          description="Who signed in, and who changed people, API keys, budgets or alert settings, in the last 90 days. Secrets are never recorded, only that they changed."
+        />
+        <CardBody>
+          <div className="mb-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <input className={inputCls} value={actionInput} onChange={(e) => setActionInput(e.target.value)}
+              placeholder="Filter by action, e.g. login, user, key, settings" aria-label="Filter by action" />
+            <input className={inputCls} value={actorInput} onChange={(e) => setActorInput(e.target.value)}
+              placeholder="Filter by who, e.g. an email or “server command”" aria-label="Filter by who" />
+          </div>
+
+          <DataState query={q} loading={<TableSkeleton rows={6} cols={4} />} isEmpty={(d) => d.items.length === 0}
+            empty={<EmptyState title="Nothing recorded" description={action || actor ? "No entries match these filters." : "Sign-ins and admin changes will appear here."} />}>
+            {(d) => (
+              <ul className="divide-y divide-border">
+                {d.items.map((e) => {
+                  const hasDetails = Object.keys(e.details ?? {}).length > 0;
+                  const isOpen = open === e.id;
+                  return (
+                    <li key={e.id} className="py-3">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-surface-2 font-mono text-[10px] font-semibold text-fg-2 ring-1 ring-border" aria-hidden>
+                          {initials(e)}
+                        </span>
+                        <div className="min-w-0 flex-1 basis-[calc(100%-3rem)] sm:basis-0">
+                          <p className="flex flex-wrap items-center gap-2 text-sm">
+                            <Badge tone={actionTone(e.action)}>{ACTION_LABEL[e.action] ?? e.action}</Badge>
+                            {e.target_type && e.target_type !== "auth" ? (
+                              <span className="font-mono text-xs text-muted">{e.target_type}{e.target_id ? ` #${e.target_id}` : ""}</span>
+                            ) : null}
+                          </p>
+                          <p className="mt-1 truncate text-xs text-muted">
+                            <span className="text-fg-2">{e.actor_email}</span> · {ACTOR_LABEL[e.actor_type] ?? e.actor_type}
+                            {e.ip_address ? <> · <span className="font-mono">{e.ip_address}</span></> : null}
+                          </p>
+                        </div>
+                        <span className="tnum text-xs text-muted" title={e.action}>{when(e.timestamp)}</span>
+                        {hasDetails ? (
+                          <button type="button" onClick={() => setOpen(isOpen ? null : e.id)} aria-expanded={isOpen}
+                            className="grid size-7 place-items-center rounded-lg text-subtle hover:bg-surface-2 hover:text-fg"
+                            aria-label={isOpen ? "Hide details" : "Show details"}>
+                            <ChevronDown className={clsx("size-4 transition-transform", isOpen && "rotate-180")} aria-hidden />
+                          </button>
+                        ) : <span className="size-7" aria-hidden />}
+                      </div>
+                      {isOpen ? <AuditDetails details={e.details} /> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </DataState>
+
+          {total > PAGE ? (
+            <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3 text-xs text-muted">
+              <span className="tnum">{from}–{to} of {total}</span>
+              <div className="flex gap-1.5">
+                <Button size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Newer</Button>
+                <Button size="sm" disabled={to >= total} onClick={() => setPage((p) => p + 1)}>Older</Button>
+              </div>
+            </div>
+          ) : null}
+        </CardBody>
+      </Card>
+      <p className="px-1 text-xs text-muted">
+        Burnrate has no way to edit or delete entries. Someone with direct access to the database still could, as with any data in it.
+      </p>
+    </div>
+  );
+}
+
+/** Before → after for changes ({"role": {"old", "new"}}), plain values for everything else. */
+function AuditDetails({ details }: { details: Record<string, unknown> }) {
+  const show = (v: unknown) => (v === null || v === undefined ? "—" : Array.isArray(v) ? v.join(", ") || "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
+  return (
+    <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-lg border border-border bg-surface-2/40 p-3 text-xs sm:ml-11">
+      {Object.entries(details).map(([k, v]) => {
+        const change = v && typeof v === "object" && !Array.isArray(v) && "old" in v && "new" in v ? (v as { old: unknown; new: unknown }) : null;
+        return (
+          <div key={k} className="contents">
+            <dt className="text-subtle">{k.replaceAll("_", " ")}</dt>
+            <dd className="min-w-0 break-words text-fg-2">
+              {change ? (
+                <>
+                  <span className="text-muted line-through">{show(change.old)}</span> → <span className="font-medium text-fg">{show(change.new)}</span>
+                </>
+              ) : (
+                show(v)
+              )}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
   );
 }

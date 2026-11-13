@@ -229,3 +229,30 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class AuditLog(Base):
+    """An immutable record of an administrative, configuration, or authentication action.
+
+    Append-only within the application. Tamper-resistant at the application layer,
+    though direct SQL access to the underlying database retains raw write access.
+    """
+
+    __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_timestamp", "timestamp"),
+        Index("ix_audit_logs_action", "action"),
+        Index("ix_audit_logs_actor_email", "actor_email"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    actor_type: Mapped[str] = mapped_column(String(20), default="user")  # "user" | "cli" | "system"
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    actor_email: Mapped[str] = mapped_column(String(254))  # user email or "server command"
+    action: Mapped[str] = mapped_column(String(64))
+    target_type: Mapped[str | None] = mapped_column(String(40))  # "user", "api_key", "settings", "budget", "auth"
+    target_id: Mapped[str | None] = mapped_column(String(100))
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    ip_address: Mapped[str | None] = mapped_column(String(45))  # IPv4/IPv6
+

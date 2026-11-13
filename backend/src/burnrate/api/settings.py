@@ -5,14 +5,15 @@ from __future__ import annotations
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from burnrate.auth import require_admin
+from burnrate.auth import Principal, require_admin
 from burnrate.config import get_settings
 from burnrate.db import get_session
 from burnrate.services import alerts, app_settings, jira, secrets
+from burnrate.services.audit import actor_info, get_client_ip, record_audit
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_admin)])
 
@@ -43,7 +44,8 @@ def get_alert_settings(session: Session = Depends(get_session)) -> dict:
 
 
 @router.put("/alerts")
-def save_webhook(body: WebhookIn, session: Session = Depends(get_session)) -> dict:
+def save_webhook(body: WebhookIn, request: Request, session: Session = Depends(get_session),
+                 who: Principal = Depends(require_admin)) -> dict:
     """Save the webhook only if a test message gets through, so a typo can't silently drop alerts."""
     try:
         url = app_settings.validate_webhook(body.webhook_url)
@@ -56,13 +58,40 @@ def save_webhook(body: WebhookIn, session: Session = Depends(get_session)) -> di
         app_settings.put(session, app_settings.WEBHOOK_KEY, url)
     except secrets.SecretKeyMissing as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="settings.slack.update",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="settings",
+        target_id="slack",
+        details={"webhook_url": "changed", "is_slack": app_settings.is_slack(url)},
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return _alerts_status(session)
 
 
 @router.delete("/alerts")
-def disconnect_webhook(session: Session = Depends(get_session)) -> dict:
+def disconnect_webhook(request: Request, session: Session = Depends(get_session),
+                       who: Principal = Depends(require_admin)) -> dict:
     """Removes the dashboard setting. A BURNRATE_ALERT_WEBHOOK_URL on the server still applies."""
     app_settings.put(session, app_settings.WEBHOOK_KEY, None)
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="settings.slack.delete",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="settings",
+        target_id="slack",
+        details={"webhook_url": None},
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return _alerts_status(session)
 
 
@@ -94,7 +123,8 @@ def get_jira(session: Session = Depends(get_session)) -> dict:
 
 
 @router.put("/jira")
-def save_jira(body: JiraIn, session: Session = Depends(get_session)) -> dict:
+def save_jira(body: JiraIn, request: Request, session: Session = Depends(get_session),
+              who: Principal = Depends(require_admin)) -> dict:
     """Save only after Jira confirms the login, project and issue type (nothing is created)."""
     existing = jira.load(session)
     token = body.api_token or (existing.api_token if existing else None)
@@ -114,17 +144,53 @@ def save_jira(body: JiraIn, session: Session = Depends(get_session)) -> dict:
         session.rollback()
         jira.clear(session)  # never leave half a connection saved
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="settings.jira.update",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="settings",
+        target_id="jira",
+        details={
+            "site": cfg.site,
+            "email": cfg.email,
+            "project_key": cfg.project_key,
+            "issue_type": cfg.issue_type,
+            "min_severity": cfg.min_severity,
+            # Editing without re-entering the token keeps the saved one.
+            "api_token": "changed" if body.api_token else "unchanged",
+        },
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return {**jira.status(session), "verified": found}
 
 
 @router.delete("/jira")
-def disconnect_jira(session: Session = Depends(get_session)) -> dict:
+def disconnect_jira(request: Request, session: Session = Depends(get_session),
+                    who: Principal = Depends(require_admin)) -> dict:
     jira.clear(session)
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="settings.jira.delete",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="settings",
+        target_id="jira",
+        details={"connected": False},
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return jira.status(session)
 
 
 @router.post("/jira/test")
-def jira_test_ticket(session: Session = Depends(get_session)) -> dict:
+def jira_test_ticket(request: Request, session: Session = Depends(get_session),
+                     who: Principal = Depends(require_admin)) -> dict:
     """Create one real ticket so the admin can see where alerts will land."""
     cfg = jira.load(session)
     if cfg is None:
@@ -136,4 +202,10 @@ def jira_test_ticket(session: Session = Depends(get_session)) -> dict:
                                     labels=("burnrate-test",))
     except jira.JiraError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    # It creates a real ticket in someone's Jira, so it belongs in the trail.
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(session, action="settings.jira.test_ticket", actor_type=act_type, actor_email=act_email,
+                 actor_id=act_id, target_type="settings", target_id="jira", details={"issue_key": key},
+                 ip_address=get_client_ip(request))
+    session.commit()
     return {"key": key, "url": cfg.issue_url(key)}

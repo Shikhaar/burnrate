@@ -54,17 +54,21 @@ def list_api_keys(session: Session) -> list[ApiKey]:
     return list(session.scalars(select(ApiKey).order_by(ApiKey.id)))
 
 
+def find_api_key(session: Session, key_ref: str) -> ApiKey | None:
+    """A key by id (from `burnrate list-keys`) or by the raw key itself."""
+    ref = key_ref.strip()
+    if ref.isdigit():
+        return session.get(ApiKey, int(ref))
+    return session.scalar(select(ApiKey).where(ApiKey.key_hash == hash_key(ref)))
+
+
 def revoke_api_key(session: Session, key_ref: str) -> ApiKey | None:
     """Revoke by id (from `burnrate list-keys`) or by the raw key itself, e.g. one found in a leak.
 
     Takes effect on the next request: every request re-checks the key. Returns None if nothing matches.
     Revoking twice keeps the original revocation time.
     """
-    ref = key_ref.strip()
-    if ref.isdigit():
-        key = session.get(ApiKey, int(ref))
-    else:
-        key = session.scalar(select(ApiKey).where(ApiKey.key_hash == hash_key(ref)))
+    key = find_api_key(session, key_ref)
     if key is not None and key.revoked_at is None:
         key.revoked_at = datetime.now(UTC)
         session.commit()

@@ -59,6 +59,12 @@ finance reviewer to verify, and the API returns which method was used.
 **Recommendations are ranked by dollars.** Each insight rule (frontier model on light traffic,
 uncached long prompts, paid-for failures) estimates monthly savings from observed traffic.
 
+**Audit trail with secret redaction.** Changes to users, roles, teams, ingest keys, budgets, and alert connections,
+as well as authentication events (logins, failed logins, invites accepted) and CLI commands, are recorded in `audit_logs`.
+The table is append-only: the application provides no APIs or mechanisms to edit or delete audit entries. Sensitive credentials
+(tokens, passwords, webhook URLs) are redacted to `"changed"` prior to persistence. Direct database operators retain raw SQL access
+to underlying rows, as with any database table.
+
 ## Storage
 
 SQLAlchemy 2.0 with one schema for SQLite (local/demo) and PostgreSQL (production; CI runs both).

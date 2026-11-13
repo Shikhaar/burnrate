@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,7 @@ from burnrate.db import get_session
 from burnrate.models import Budget, PriceEntry
 from burnrate.schemas import BudgetIn, Dimension
 from burnrate.services import alerts, analytics, anomalies, budgets, forecast, insights, reconciliation
+from burnrate.services.audit import actor_info, get_client_ip, record_audit
 
 router = APIRouter(prefix="/api", tags=["dashboard"], dependencies=[Depends(require_dashboard_access)])
 
@@ -87,22 +88,48 @@ def get_budgets(session: SessionDep, who: WhoDep) -> dict:
 
 
 @router.post("/budgets", status_code=status.HTTP_201_CREATED)
-def create_budget(body: BudgetIn, session: SessionDep, who: WhoDep) -> dict:
+def create_budget(body: BudgetIn, request: Request, session: SessionDep, who: WhoDep) -> dict:
     if bool(body.scope_dimension) != bool(body.scope_value):
         raise HTTPException(422, "scope_dimension and scope_value must be set together")
     if not _visible(who, body.scope_dimension, body.scope_value):
         raise HTTPException(403, "You can only create budgets for your own teams")
     budget = Budget(**body.model_dump())
     session.add(budget)
+    session.flush()
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="budget.create",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="budget",
+        target_id=str(budget.id),
+        details={"name": budget.name, "monthly_limit_usd": budget.monthly_limit_usd,
+                 "scope_dimension": budget.scope_dimension, "scope_value": budget.scope_value},
+        ip_address=get_client_ip(request),
+    )
     session.commit()
     return budgets.evaluate(session, budget)
 
 
 @router.delete("/budgets/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_budget(budget_id: int, session: SessionDep, who: WhoDep) -> Response:
+def delete_budget(budget_id: int, request: Request, session: SessionDep, who: WhoDep) -> Response:
     budget = session.get(Budget, budget_id)
     if budget is None or not _visible(who, budget.scope_dimension, budget.scope_value):
         raise HTTPException(404, "Budget not found")
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="budget.delete",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="budget",
+        target_id=str(budget_id),
+        details={"name": budget.name},
+        ip_address=get_client_ip(request),
+    )
     session.delete(budget)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

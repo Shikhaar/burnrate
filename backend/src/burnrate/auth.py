@@ -220,6 +220,7 @@ class Principal:
     user: User | None
     role: str
     teams: tuple[str, ...] | None  # None = all teams
+    via: str = "session"  # "session" | "token" (BURNRATE_DASHBOARD_TOKEN) | "open" (no users exist yet)
 
     @property
     def scoped(self) -> bool:
@@ -229,7 +230,8 @@ class Principal:
         return {"role": self.role, "teams": list(self.teams) if self.teams is not None else None}
 
 
-ADMIN = Principal(user=None, role="admin", teams=None)
+TOKEN_ADMIN = Principal(user=None, role="admin", teams=None, via="token")
+OPEN_ADMIN = Principal(user=None, role="admin", teams=None, via="open")
 
 
 def principal_for(user: User) -> Principal:
@@ -268,11 +270,11 @@ def require_dashboard_access(
 ) -> Principal:
     """Guard for `/api/*`: who is asking, with viewers kept to reads and data limited to their teams."""
     if _token_ok(authorization):
-        return ADMIN
+        return TOKEN_ADMIN
     user = user_for_session(session, request.cookies.get(COOKIE_NAME))
     if user is None:
         if not get_settings().dashboard_token and not login_required(session):
-            return ADMIN  # nothing configured: open local demo
+            return OPEN_ADMIN  # nothing configured: open local demo
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in required")
     unsafe = request.method not in SAFE_METHODS
     if unsafe and request.headers.get(CSRF_HEADER) != CSRF_VALUE:

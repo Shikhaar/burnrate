@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from burnrate import auth
 from burnrate.config import get_settings
 from burnrate.db import get_session
+from burnrate.services.audit import get_client_ip, record_audit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -22,6 +23,10 @@ MAX_FAILURES = 10
 FAILURE_WINDOW_S = 15 * 60
 _failures: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 _failures_lock = threading.Lock()
+# Failed sign-ins are recorded in the audit log, but anyone can trigger them, with any email. Cap how
+# many one address can add per window so the log can't be flooded; the cap itself is recorded once.
+MAX_AUDITED_FAILURES_PER_IP = 20
+_audited_failures: dict[str, deque[float]] = defaultdict(deque)
 
 
 class LoginIn(BaseModel):
@@ -51,7 +56,9 @@ def _recent_failures(key: tuple[str, str], now: float) -> deque[float]:
 
 @router.post("/login")
 def login(body: LoginIn, request: Request, response: Response, session: Session = Depends(get_session)) -> dict:
-    key = (auth.normalize_email(body.email), request.client.host if request.client else "")
+    ip = get_client_ip(request)
+    normalized = auth.normalize_email(body.email)
+    key = (normalized, request.client.host if request.client else "")
     now = time.monotonic()
     with _failures_lock:
         if len(_recent_failures(key, now)) >= MAX_FAILURES:
@@ -60,17 +67,69 @@ def login(body: LoginIn, request: Request, response: Response, session: Session 
     if user is None:
         with _failures_lock:
             _recent_failures(key, now).append(now)
+        with _failures_lock:
+            seen = _audited_failures[ip or ""]
+            while seen and seen[0] < now - FAILURE_WINDOW_S:
+                seen.popleft()
+            seen.append(now)
+            audited = len(seen)
+        if audited <= MAX_AUDITED_FAILURES_PER_IP:
+            record_audit(
+                session,
+                action="auth.login.failed",
+                actor_type="anonymous",  # nobody is signed in; the email is only what was typed
+                actor_email=normalized[:254],
+                target_type="auth",
+                target_id=normalized[:100],
+                details={"reason": "invalid_credentials"},
+                ip_address=ip,
+            )
+        elif audited == MAX_AUDITED_FAILURES_PER_IP + 1:
+            record_audit(
+                session,
+                action="auth.login.failed.capped",
+                actor_type="anonymous",
+                actor_email="(many emails)",
+                target_type="auth",
+                details={"reason": f"over {MAX_AUDITED_FAILURES_PER_IP} failed sign-ins from this address in "
+                                   f"{FAILURE_WINDOW_S // 60} minutes; further failures aren't recorded"},
+                ip_address=ip,
+            )
+        session.commit()
         # Same message whether the email exists or not.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong email or password")
     with _failures_lock:
         _failures.pop(key, None)
+    record_audit(
+        session,
+        action="auth.login.success",
+        actor_email=user.email,
+        actor_id=user.id,
+        target_type="auth",
+        target_id=user.email,
+        ip_address=ip,
+    )
     _set_session_cookie(response, session, user)
+    session.commit()
     return {"user": _user_out(user)}
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(request: Request, response: Response, session: Session = Depends(get_session)) -> None:
-    auth.end_session(session, request.cookies.get(auth.COOKIE_NAME))
+    token = request.cookies.get(auth.COOKIE_NAME)
+    user = auth.user_for_session(session, token)
+    if user is not None:
+        record_audit(
+            session,
+            action="auth.logout",
+            actor_email=user.email,
+            actor_id=user.id,
+            target_type="auth",
+            target_id=user.email,
+            ip_address=get_client_ip(request),
+        )
+    auth.end_session(session, token)
+    session.commit()
     response.delete_cookie(auth.COOKIE_NAME, path="/")
 
 
@@ -96,7 +155,8 @@ def check_invite(token: str, session: Session = Depends(get_session)) -> dict:
 
 
 @router.post("/invite")
-def accept_invite(body: InviteIn, response: Response, session: Session = Depends(get_session)) -> dict:
+def accept_invite(body: InviteIn, request: Request, response: Response,
+                  session: Session = Depends(get_session)) -> dict:
     """Set a password from an invite or reset link, then sign in."""
     try:
         user = auth.accept_invite(session, body.token, body.password)
@@ -104,5 +164,16 @@ def accept_invite(body: InviteIn, response: Response, session: Session = Depends
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from None
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "This link has expired or was already used.")
+    record_audit(
+        session,
+        action="auth.invite.accepted",
+        actor_email=user.email,
+        actor_id=user.id,
+        target_type="user",
+        target_id=str(user.id),
+        details={"password": "set"},
+        ip_address=get_client_ip(request),
+    )
     _set_session_cookie(response, session, user)
+    session.commit()
     return {"user": _user_out(user)}

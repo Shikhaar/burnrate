@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,7 +13,8 @@ from burnrate import auth
 from burnrate.auth import Principal, require_admin
 from burnrate.db import get_session
 from burnrate.models import ApiKey, User
-from burnrate.security import create_api_key, list_api_keys, revoke_api_key
+from burnrate.security import create_api_key, find_api_key, hash_key, list_api_keys, revoke_api_key
+from burnrate.services.audit import actor_info, get_client_ip, list_audit_logs, record_audit
 
 router = APIRouter(prefix="/api", tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -55,16 +56,30 @@ def list_users(session: Session = Depends(get_session)) -> dict:
 
 
 @router.post("/users", status_code=status.HTTP_201_CREATED)
-def invite_user(body: UserIn, session: Session = Depends(get_session)) -> dict:
+def invite_user(body: UserIn, request: Request, session: Session = Depends(get_session),
+                who: Principal = Depends(require_admin)) -> dict:
     try:
         user = auth.create_user(session, body.email, None, body.name, body.role, body.teams)
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from None
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="user.create",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="user",
+        target_id=str(user.id),
+        details={"email": user.email, "name": user.name, "role": user.role, "teams": user.teams},
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return {"user": user_out(user), **_invite(session, user)}
 
 
 @router.patch("/users/{user_id}")
-def update_user(user_id: int, body: UserPatch, session: Session = Depends(get_session),
+def update_user(user_id: int, body: UserPatch, request: Request, session: Session = Depends(get_session),
                 who: Principal = Depends(require_admin)) -> dict:
     user = session.get(User, user_id)
     if user is None:
@@ -87,23 +102,61 @@ def update_user(user_id: int, body: UserPatch, session: Session = Depends(get_se
     if was_admin and not stays_admin and auth.active_admins(session) <= 1:
         raise HTTPException(status.HTTP_409_CONFLICT, "Keep at least one active admin.")
 
+    diff = {}
     if "name" in changes:
-        user.name = (body.name or "").strip() or None
+        new_name = (body.name or "").strip() or None
+        diff["name"] = {"old": user.name, "new": new_name}
+        user.name = new_name
+    if role != user.role:
+        diff["role"] = {"old": user.role, "new": role}
+    if teams != user.teams:
+        diff["teams"] = {"old": user.teams, "new": teams}
     user.role, user.teams = role, teams
     if disabled != (user.disabled_at is not None):
+        diff["disabled"] = {"old": user.disabled_at is not None, "new": disabled}
         auth.set_disabled(session, user, disabled)  # commits; disabling also ends their sessions
+
+    if not diff:
+        session.commit()
+        return {"user": user_out(user)}  # a save with no changes isn't an event
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="user.update",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="user",
+        target_id=str(user.id),
+        details=diff,
+        ip_address=get_client_ip(request),
+    )
     session.commit()
     return {"user": user_out(user)}
 
 
 @router.post("/users/{user_id}/invite")
-def new_invite_link(user_id: int, session: Session = Depends(get_session)) -> dict:
+def new_invite_link(user_id: int, request: Request, session: Session = Depends(get_session),
+                    who: Principal = Depends(require_admin)) -> dict:
     """A fresh link to set a password: for a new user who lost theirs, or to reset a forgotten password."""
     user = session.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     if user.disabled_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Enable this user first.")
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="user.invite.renew",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="user",
+        target_id=str(user.id),
+        details={"email": user.email},
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return {"user": user_out(user), **_invite(session, user)}
 
 
@@ -123,28 +176,88 @@ def list_keys(session: Session = Depends(get_session)) -> dict:
 
 
 @router.post("/keys", status_code=status.HTTP_201_CREATED)
-def new_key(body: KeyIn, session: Session = Depends(get_session)) -> dict:
+def new_key(body: KeyIn, request: Request, session: Session = Depends(get_session),
+            who: Principal = Depends(require_admin)) -> dict:
     raw = create_api_key(session, body.name.strip())
-    key = session.scalar(select(ApiKey).order_by(ApiKey.id.desc()).limit(1))
+    key = session.scalar(select(ApiKey).where(ApiKey.key_hash == hash_key(raw)))
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="key.create",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="api_key",
+        target_id=str(key.id),
+        details={"name": key.name, "prefix": key.prefix},
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return {"key": key_out(key), "secret": raw}  # the only time the full key is returned
 
 
 @router.post("/keys/{key_id}/revoke")
-def revoke_key(key_id: int, session: Session = Depends(get_session)) -> dict:
+def revoke_key(key_id: int, request: Request, session: Session = Depends(get_session),
+               who: Principal = Depends(require_admin)) -> dict:
+    existing = find_api_key(session, str(key_id))
+    already_revoked = existing is not None and existing.revoked_at is not None
     key = revoke_api_key(session, str(key_id))
     if key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Key not found")
+    if already_revoked:
+        return {"key": key_out(key)}  # nothing changed, so nothing to record
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="key.revoke",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="api_key",
+        target_id=str(key.id),
+        details={"name": key.name, "prefix": key.prefix},
+        ip_address=get_client_ip(request),
+    )
+    session.commit()
     return {"key": key_out(key)}
 
 
 @router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_key(key_id: int, session: Session = Depends(get_session)) -> Response:
+def delete_key(key_id: int, request: Request, session: Session = Depends(get_session),
+               who: Principal = Depends(require_admin)) -> Response:
     """Remove a revoked key from the list. Active keys must be revoked first, so deleting never breaks an app."""
     key = session.get(ApiKey, key_id)
     if key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Key not found")
     if key.revoked_at is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Revoke this key before deleting it.")
+    act_type, act_email, act_id = actor_info(who)
+    record_audit(
+        session,
+        action="key.delete",
+        actor_type=act_type,
+        actor_email=act_email,
+        actor_id=act_id,
+        target_type="api_key",
+        target_id=str(key.id),
+        details={"name": key.name, "prefix": key.prefix},
+        ip_address=get_client_ip(request),
+    )
     session.delete(key)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---- audit logs (read-only; append-only via application) -------------------------------------------------
+@router.get("/audit-logs")
+def get_audit_logs(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    action: str | None = None,
+    actor: str | None = None,
+    days: int = Query(30, ge=1, le=365),
+    session: Session = Depends(get_session),
+) -> dict:
+    """List audit log entries. Admin only. No edit or delete endpoints exist."""
+    return list_audit_logs(session, limit=limit, offset=offset, action=action, actor=actor, days=days)
+

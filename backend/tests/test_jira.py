@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from burnrate.config import get_settings
-from burnrate.models import Alert, Budget
+from burnrate.models import Alert, AuditLog, Budget
 from burnrate.schemas import EventIn
 from burnrate.services import alerts, jira
 from burnrate.services.ingest import ingest_events
@@ -54,7 +54,7 @@ def fake_jira(monkeypatch):
     return state
 
 
-def test_connect_checks_login_project_and_issue_type(client, fake_jira):
+def test_connect_checks_login_project_and_issue_type(client, session, fake_jira):
     assert client.get("/api/settings/jira", headers=ADMIN).json()["connected"] is False
 
     bad = client.put("/api/settings/jira", json={**GOOD, "api_token": "wrong"}, headers=ADMIN)
@@ -76,6 +76,11 @@ def test_connect_checks_login_project_and_issue_type(client, fake_jira):
     edited = client.put("/api/settings/jira", json={**GOOD, "api_token": None, "issue_type": "Bug",
                                                     "min_severity": "medium"}, headers=ADMIN).json()
     assert edited["issue_type"] == "Bug" and edited["min_severity"] == "medium"
+    # The audit trail says whether the token changed, never what it is.
+    session.expire_all()
+    tokens = [r.details["api_token"] for r in session.query(AuditLog)
+              .filter(AuditLog.action == "settings.jira.update").order_by(AuditLog.id)]
+    assert tokens == ["changed", "unchanged"]
 
     test = client.post("/api/settings/jira/test", headers=ADMIN).json()
     assert test == {"key": "OPS-1", "url": "https://acme.atlassian.net/browse/OPS-1"}

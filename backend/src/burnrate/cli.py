@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from burnrate.db import SessionLocal, init_db
 from burnrate.pricing import reprice, sync_registry
+from burnrate.services.audit import record_audit
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -78,9 +79,22 @@ def main(argv: list[str] | None = None) -> int:
             stats = generate(session, days=args.days)
             print(f"Seeded {stats['events']:,} events (${stats['estimated_cost_usd']:,.2f} estimated spend).")
         elif args.cmd == "create-key":
-            from burnrate.security import create_api_key
+            from burnrate.models import ApiKey
+            from burnrate.security import create_api_key, hash_key
 
-            print(create_api_key(session, args.name))
+            raw = create_api_key(session, args.name)
+            key = session.scalar(select(ApiKey).where(ApiKey.key_hash == hash_key(raw)))
+            record_audit(
+                session,
+                action="key.create",
+                actor_type="cli",
+                actor_email="server command",
+                target_type="api_key",
+                target_id=str(key.id) if key else None,
+                details={"name": args.name, "prefix": key.prefix if key else None},
+            )
+            session.commit()
+            print(raw)
             print("Store this key now; it cannot be shown again.", file=sys.stderr)
         elif args.cmd == "list-keys":
             from burnrate.security import list_api_keys
@@ -91,13 +105,28 @@ def main(argv: list[str] | None = None) -> int:
             for key in keys:
                 print(_key_row(key))
         elif args.cmd == "revoke-key":
-            from burnrate.security import revoke_api_key
+            from burnrate.security import find_api_key, revoke_api_key
 
+            found = find_api_key(session, args.key)
+            already_revoked = found is not None and found.revoked_at is not None
             key = revoke_api_key(session, args.key)
             if key is None:
                 # Don't echo the argument: it may be a raw key.
                 print("No matching key. Use the id from `burnrate list-keys` or the full key.", file=sys.stderr)
                 return 1
+            if already_revoked:
+                print(f"Already revoked: {_key_row(key)}")
+                return 0
+            record_audit(
+                session,
+                action="key.revoke",
+                actor_type="cli",
+                actor_email="server command",
+                target_type="api_key",
+                target_id=str(key.id),
+                details={"name": key.name, "prefix": key.prefix},
+            )
+            session.commit()
             print(f"Revoked: {_key_row(key)}")
         elif args.cmd in ("create-user", "list-users", "reset-password", "disable-user", "enable-user"):
             return _users(session, args)
@@ -168,6 +197,16 @@ def _users(session, args) -> int:
             teams = [t for t in args.teams.split(",")] if args.teams else None
             user = auth.create_user(session, args.email, _read_password(args.password_stdin), args.name,
                                     args.role, teams)
+            record_audit(
+                session,
+                action="user.create",
+                actor_type="cli",
+                actor_email="server command",
+                target_type="user",
+                target_id=str(user.id),
+                details={"email": user.email, "name": user.name, "role": user.role, "teams": user.teams},
+            )
+            session.commit()
         except ValueError as e:
             print(e, file=sys.stderr)
             return 1
@@ -181,13 +220,34 @@ def _users(session, args) -> int:
     if args.cmd == "reset-password":
         try:
             auth.set_password(session, user, _read_password(args.password_stdin))
+            record_audit(
+                session,
+                action="user.password.reset",
+                actor_type="cli",
+                actor_email="server command",
+                target_type="user",
+                target_id=str(user.id),
+                details={"email": user.email, "password": "changed"},
+            )
+            session.commit()
         except ValueError as e:
             print(e, file=sys.stderr)
             return 1
         print(f"Password updated for {user.email}; their existing sessions were signed out.")
     else:
-        auth.set_disabled(session, user, args.cmd == "disable-user")
-        print(f"{user.email} {'disabled and signed out' if args.cmd == 'disable-user' else 'enabled'}.")
+        is_disable = args.cmd == "disable-user"
+        auth.set_disabled(session, user, is_disable)
+        record_audit(
+            session,
+            action="user.disable" if is_disable else "user.enable",
+            actor_type="cli",
+            actor_email="server command",
+            target_type="user",
+            target_id=str(user.id),
+            details={"email": user.email, "disabled": is_disable},
+        )
+        session.commit()
+        print(f"{user.email} {'disabled and signed out' if is_disable else 'enabled'}.")
     return 0
 
 

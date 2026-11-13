@@ -482,3 +482,33 @@ export const connectJira = (body: {
   );
 export const disconnectJira = () => request<JiraSettings>("/api/settings/jira", { method: "DELETE" });
 export const createJiraTestTicket = () => request<{ key: string; url: string }>("/api/settings/jira/test", { method: "POST" });
+
+export interface AuditLogEntry {
+  id: number;
+  timestamp: string;
+  /** user: signed in · cli: server command · token: BURNRATE_DASHBOARD_TOKEN · anonymous: failed sign-in · system: open demo */
+  actor_type: "user" | "cli" | "token" | "anonymous" | "system";
+  actor_id: number | null;
+  actor_email: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  details: Record<string, unknown>;
+  ip_address: string | null;
+}
+
+export interface AuditLogsResponse {
+  total: number;
+  items: AuditLogEntry[];
+}
+
+export const useAuditLogs = (params?: { action?: string; actor?: string; days?: number; limit?: number; offset?: number }) => {
+  const q = new URLSearchParams();
+  if (params?.action) q.set("action", params.action);
+  if (params?.actor) q.set("actor", params.actor);
+  if (params?.days) q.set("days", String(params.days));
+  if (params?.limit) q.set("limit", String(params.limit));
+  if (params?.offset) q.set("offset", String(params.offset));
+  const qs = q.toString();
+  return useApi<AuditLogsResponse>(`/api/audit-logs${qs ? `?${qs}` : ""}`);
+};

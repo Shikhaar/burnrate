@@ -39,6 +39,7 @@ state lives in Postgres.
 | `BURNRATE_LOG_FORMAT` / `BURNRATE_LOG_LEVEL` | `json` for log pipelines (default `text`); level defaults to `INFO` |
 | `BURNRATE_INGEST_RATE_LIMIT_PER_MINUTE` | Requests per minute per ingest API key (default 1200; `0` disables) |
 | `BURNRATE_API_RATE_LIMIT_PER_MINUTE` | Requests per minute per client IP on `/api/*` (default 600; `0` disables) |
+| `BURNRATE_TRUSTED_PROXIES` | Comma-separated addresses of your own reverse proxies / load balancers. Only requests arriving from these have their `X-Forwarded-For` header used for the client address in the audit log; unset = the direct connection's address |
 | `BURNRATE_REDIS_URL` | e.g. `redis://redis:6379/0`. Shares rate limits across API replicas; unset = per-process limits |
 | `BURNRATE_OPENAI_ADMIN_KEY` / `BURNRATE_ANTHROPIC_ADMIN_KEY` | Billing sync for reconciliation. Full admin keys: see [Keys and access](#keys-and-access) |
 | `BURNRATE_CURSOR_ADMIN_KEY` | Cursor team admin API key; `burnrate sync cursor` imports per-request usage. Full admin key |
@@ -82,6 +83,23 @@ hidden). They can't see reconciliation (provider bills span every team) or the c
 history, and can only create budgets for their own teams. The CLI can set both:
 `burnrate create-user pat@acme.io --role viewer --teams search,support`. Existing users become admins
 when you upgrade, and the API refuses to remove or demote the last unrestricted admin.
+
+## Audit log
+
+**Settings → Audit log** (admins only) lists the last 90 days of sign-ins, failed sign-ins, and
+changes to people, API keys, budgets and alert connections, including changes made with the CLI on
+the server. Each entry has who, when, from which address, and what changed (role viewer → member).
+Secrets never appear: the log says only "changed" or "unchanged".
+
+- **Can't be edited from Burnrate.** There's no way in the app or API to change or delete entries.
+  Someone with direct database access still could, as with any table; if you need stronger
+  guarantees, stream the table to write-once storage.
+- **Failed sign-ins** are recorded with the email that was typed, as "Not signed in". To stop anyone
+  flooding the log, each address can add at most 20 per 15 minutes; one further entry notes the rest
+  weren't recorded.
+- **Client addresses** come from the connection itself. Behind a proxy that address is the proxy's, so
+  set `BURNRATE_TRUSTED_PROXIES` to your proxies' addresses. Burnrate then reads `X-Forwarded-For` from
+  the right, skipping your proxies, so a client can't fake its address by sending the header itself.
 
 ## Alerts
 
