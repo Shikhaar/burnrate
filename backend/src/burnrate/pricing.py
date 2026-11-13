@@ -56,20 +56,22 @@ def load_registry_file(path: Path = DEFAULT_REGISTRY) -> list[dict]:
     default_from = date.fromisoformat(str(raw.get("defaults", {}).get("effective_from", "2025-01-01")))
     rows = []
     for provider, models in raw["models"].items():
-        for model, p in models.items():
-            rows.append(
-                {
-                    "provider": str(provider).lower(),
-                    "model": str(model).lower(),
-                    "input_per_mtok": float(p["input"]),
-                    "output_per_mtok": float(p.get("output", 0)),
-                    "cached_input_per_mtok": p.get("cached_input"),
-                    "cache_write_per_mtok": p.get("cache_write"),
-                    "effective_from": date.fromisoformat(str(p["effective_from"]))
-                    if "effective_from" in p
-                    else default_from,
-                }
-            )
+        for model, spec in models.items():
+            # One price, or a list of dated versions (a price change appends a version).
+            for p in spec if isinstance(spec, list) else [spec]:
+                rows.append(
+                    {
+                        "provider": str(provider).lower(),
+                        "model": str(model).lower(),
+                        "input_per_mtok": float(p["input"]),
+                        "output_per_mtok": float(p.get("output", 0)),
+                        "cached_input_per_mtok": p.get("cached_input"),
+                        "cache_write_per_mtok": p.get("cache_write"),
+                        "effective_from": date.fromisoformat(str(p["effective_from"]))
+                        if "effective_from" in p
+                        else default_from,
+                    }
+                )
     return rows
 
 

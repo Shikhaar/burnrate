@@ -1,40 +1,122 @@
 # Model price registry — USD per 1M tokens.
-# Entries are versioned by `effective_from`; a price change is a NEW entry, never an edit, so
-# historical costs stay reproducible. Verify against each provider's pricing page before relying
-# on these numbers; override or extend via `burnrate pricing load <file.yaml>`.
+# A price change is a NEW dated version, never an edit, so historical costs stay reproducible
+# (and `burnrate` only ever inserts entries it hasn't seen by provider/model/effective_from).
+# A model is either one entry or a list of versions, each with its own `effective_from`.
+# Override or extend via `burnrate pricing load <file.yaml>`.
 #
-# Matching: exact model id first, then the longest registered prefix
+# Matching: exact model id, or a dated snapshot / alias of it
 # (e.g. "gpt-4o-2024-08-06" -> "gpt-4o", "claude-sonnet-4-5-20250929" -> "claude-sonnet-4-5").
+#
+# Last checked against each provider's published pricing on 2026-11-13. Where a provider changed a
+# price without a published date, the new version is dated 2026-11-13 (the day it was verified).
+# Simplifications, since the engine prices every request at one flat rate per token class:
+#   - cache_write is the shortest cache tier (Anthropic 5-minute, OpenAI 30-minute write).
+#   - Long-prompt surcharges are not modelled: Claude Haiku 5.5 is listed at its <=100k-token
+#     rates, Gemini Pro models at their <=200k rates, OpenAI models at their short-context rates.
+#   - Gemini rates are for text / image / video input; audio input costs more.
 
 defaults:
   effective_from: "2025-01-01"
 
 models:
   openai:
-    gpt-5:                   { input: 1.25, output: 10.00, cached_input: 0.125 }
-    gpt-5-mini:              { input: 0.25, output: 2.00,  cached_input: 0.025 }
-    gpt-5-nano:              { input: 0.05, output: 0.40,  cached_input: 0.005 }
-    gpt-4.1:                 { input: 2.00, output: 8.00,  cached_input: 0.50 }
-    gpt-4.1-mini:            { input: 0.40, output: 1.60,  cached_input: 0.10 }
-    gpt-4.1-nano:            { input: 0.10, output: 0.40,  cached_input: 0.025 }
-    gpt-4o:                  { input: 2.50, output: 10.00, cached_input: 1.25 }
-    gpt-4o-mini:             { input: 0.15, output: 0.60,  cached_input: 0.075 }
-    o3:                      { input: 2.00, output: 8.00,  cached_input: 0.50 }
-    o4-mini:                 { input: 1.10, output: 4.40,  cached_input: 0.275 }
-    text-embedding-3-small:  { input: 0.02, output: 0 }
-    text-embedding-3-large:  { input: 0.13, output: 0 }
+    gpt-6-astra:             { input: 10.00, output: 50.00, cached_input: 1.00,  cache_write: 12.50 }
+    gpt-6.1-sol:             { input: 2.00,  output: 10.00, cached_input: 0.10,  cache_write: 2.50 }
+    gpt-6.1-terra:           { input: 1.00,  output: 5.00,  cached_input: 0.05,  cache_write: 1.25 }
+    gpt-6-sol:               { input: 2.00,  output: 10.00, cached_input: 0.20,  cache_write: 2.50 }
+    gpt-6-luna:              { input: 0.10,  output: 0.50,  cached_input: 0.01,  cache_write: 0.125 }
+    # gpt-5.6-sol is on promotional pricing until 2026-11-30; OpenAI hasn't published the price after.
+    gpt-5.6-sol:             { input: 4.00,  output: 20.00, cached_input: 0.40,  cache_write: 5.00 }
+    gpt-5.6-terra:           { input: 2.00,  output: 12.00, cached_input: 0.20,  cache_write: 2.50 }
+    gpt-5.6-luna:            { input: 0.20,  output: 1.20,  cached_input: 0.02,  cache_write: 0.25 }
+    gpt-5.5:                 { input: 5.00,  output: 30.00, cached_input: 0.50 }
+    gpt-5.5-pro:             { input: 30.00, output: 180.00 }
+    gpt-5.4:                 { input: 2.50,  output: 15.00, cached_input: 0.25 }
+    gpt-5.4-pro:             { input: 30.00, output: 180.00 }
+    gpt-5.4-mini:            { input: 0.75,  output: 4.50,  cached_input: 0.075 }
+    gpt-5.4-nano:            { input: 0.20,  output: 1.25,  cached_input: 0.02 }
+    gpt-5.2:                 { input: 1.75,  output: 14.00, cached_input: 0.175 }
+    gpt-5.2-pro:             { input: 21.00, output: 168.00 }
+    gpt-5.1:                 { input: 1.25,  output: 10.00, cached_input: 0.125 }
+    gpt-5:                   { input: 1.25,  output: 10.00, cached_input: 0.125 }
+    gpt-5-mini:              { input: 0.25,  output: 2.00,  cached_input: 0.025 }
+    gpt-5-nano:              { input: 0.05,  output: 0.40,  cached_input: 0.005 }
+    gpt-5-pro:               { input: 15.00, output: 120.00 }
+    gpt-4.1:                 { input: 2.00,  output: 8.00,  cached_input: 0.50 }
+    gpt-4.1-mini:            { input: 0.40,  output: 1.60,  cached_input: 0.10 }
+    gpt-4.1-nano:            { input: 0.10,  output: 0.40,  cached_input: 0.025 }  # no longer listed
+    gpt-4o:                  { input: 2.50,  output: 10.00, cached_input: 1.25 }
+    gpt-4o-mini:             { input: 0.15,  output: 0.60,  cached_input: 0.075 }
+    o3:                      { input: 2.00,  output: 8.00,  cached_input: 0.50 }
+    o3-pro:                  { input: 20.00, output: 80.00 }
+    o4-mini:                 { input: 1.10,  output: 4.40,  cached_input: 0.275 }  # no longer listed
+    text-embedding-3-small:  { input: 0.02,  output: 0 }  # no longer listed
+    text-embedding-3-large:  { input: 0.13,  output: 0 }  # no longer listed
   anthropic:
+    claude-fable-5-2:        { input: 8.00,  output: 40.00, cached_input: 0.20, cache_write: 10.00 }
+    claude-mythos-5-2:       { input: 8.00,  output: 40.00, cached_input: 0.20, cache_write: 10.00 }
+    claude-fable-5-1:        { input: 10.00, output: 50.00, cached_input: 0.25, cache_write: 12.50 }
+    claude-mythos-5-1:       { input: 10.00, output: 50.00, cached_input: 0.25, cache_write: 12.50 }
+    claude-fable-5:          { input: 10.00, output: 50.00, cached_input: 1.00, cache_write: 12.50 }
+    claude-mythos-5:         { input: 10.00, output: 50.00, cached_input: 1.00, cache_write: 12.50 }
+    claude-opus-5-5:         { input: 4.00,  output: 20.00, cached_input: 0.20, cache_write: 5.00 }
+    claude-opus-5:           { input: 5.00,  output: 25.00, cached_input: 0.50, cache_write: 6.25 }
+    claude-opus-4-8:         { input: 5.00,  output: 25.00, cached_input: 0.50, cache_write: 6.25 }
+    claude-opus-4-7:         { input: 5.00,  output: 25.00, cached_input: 0.50, cache_write: 6.25 }
+    claude-opus-4-6:         { input: 5.00,  output: 25.00, cached_input: 0.50, cache_write: 6.25 }
     claude-opus-4-5:         { input: 5.00,  output: 25.00, cached_input: 0.50, cache_write: 6.25 }
     claude-opus-4-1:         { input: 15.00, output: 75.00, cached_input: 1.50, cache_write: 18.75 }
+    claude-opus-4:           { input: 15.00, output: 75.00, cached_input: 1.50, cache_write: 18.75 }
+    claude-sonnet-5-5:       { input: 2.00,  output: 10.00, cached_input: 0.10, cache_write: 2.50 }
+    claude-sonnet-5:         { input: 2.00,  output: 10.00, cached_input: 0.20, cache_write: 2.50 }
+    claude-sonnet-4-6:       { input: 3.00,  output: 15.00, cached_input: 0.30, cache_write: 3.75 }
     claude-sonnet-4-5:       { input: 3.00,  output: 15.00, cached_input: 0.30, cache_write: 3.75 }
     claude-sonnet-4:         { input: 3.00,  output: 15.00, cached_input: 0.30, cache_write: 3.75 }
+    claude-haiku-5-5:        { input: 0.10,  output: 0.50,  cached_input: 0.01, cache_write: 0.125 }
     claude-haiku-4-5:        { input: 1.00,  output: 5.00,  cached_input: 0.10, cache_write: 1.25 }
-    claude-3-5-haiku:        { input: 0.80,  output: 4.00,  cached_input: 0.08, cache_write: 1.00 }
+    claude-3-5-haiku:        { input: 0.80,  output: 4.00,  cached_input: 0.08, cache_write: 1.00 }  # retired
   google:
-    gemini-2.5-pro:          { input: 1.25, output: 10.00, cached_input: 0.31 }
-    gemini-2.5-flash:        { input: 0.30, output: 2.50,  cached_input: 0.075 }
-    gemini-2.5-flash-lite:   { input: 0.10, output: 0.40,  cached_input: 0.025 }
-    text-embedding-004:      { input: 0.00, output: 0 }
+    # Gemini 4 Carbon and Argon double in price on 2026-12-01; 3.8 and 3.6 Flash on 2027-01-01.
+    gemini-4-carbon:
+      - { input: 2.00, output: 10.00, cached_input: 0.10 }
+      - { input: 4.00, output: 20.00, cached_input: 0.20, effective_from: "2026-12-01" }
+    gemini-4-argon:
+      - { input: 2.00, output: 10.00, cached_input: 0.10 }
+      - { input: 4.00, output: 20.00, cached_input: 0.20, effective_from: "2026-12-01" }
+    gemini-4-hydrogen:       { input: 1.50, output: 7.50,  cached_input: 0.075 }
+    gemini-3.8-flash:
+      - { input: 0.75, output: 3.75, cached_input: 0.075 }
+      - { input: 1.50, output: 7.50, cached_input: 0.15, effective_from: "2027-01-01" }
+    gemini-3.6-flash:
+      - { input: 0.75, output: 3.75, cached_input: 0.075 }
+      - { input: 1.50, output: 7.50, cached_input: 0.15, effective_from: "2027-01-01" }
+    gemini-3.5-flash-lite:   { input: 0.30, output: 2.50,  cached_input: 0.03 }
+    gemini-3.1-pro-preview:  { input: 2.00, output: 12.00, cached_input: 0.20 }
+    gemini-3.1-flash-lite:   { input: 0.25, output: 1.50,  cached_input: 0.025 }
+    gemini-3-flash-preview:  { input: 0.50, output: 3.00,  cached_input: 0.05 }
+    # 2.5 Pro and 2.5 Flash are deprecated: from 2026-12-01 their requests are routed to
+    # gemini-3.8-flash and gemini-3.5-flash-lite and billed at those models' rates.
+    gemini-2.5-pro:
+      - { input: 1.25, output: 10.00, cached_input: 0.31 }
+      - { input: 1.25, output: 10.00, cached_input: 0.125, effective_from: "2026-11-13" }
+      - { input: 0.75, output: 3.75,  cached_input: 0.075, effective_from: "2026-12-01" }
+      - { input: 1.50, output: 7.50,  cached_input: 0.15,  effective_from: "2027-01-01" }
+    gemini-2.5-flash:
+      - { input: 0.30, output: 2.50, cached_input: 0.075 }
+      - { input: 0.30, output: 2.50, cached_input: 0.03, effective_from: "2026-11-13" }
+    gemini-2.5-flash-lite:
+      - { input: 0.10, output: 0.40, cached_input: 0.025 }
+      - { input: 0.10, output: 0.40, cached_input: 0.01, effective_from: "2026-11-13" }
+    gemini-embedding-2:      { input: 0.20, output: 0 }  # text input
+    gemini-embedding-001:    { input: 0.15, output: 0 }
+    text-embedding-004:      { input: 0.00, output: 0 }  # no longer listed
   mistral:
-    mistral-large:           { input: 2.00, output: 6.00 }
-    mistral-small:           { input: 0.10, output: 0.30 }
+    # Aliases (also reached as *-latest) follow the newest model: Large 4 since its 2026-11-05 GA.
+    mistral-large:
+      - { input: 2.00, output: 6.00 }
+      - { input: 0.70, output: 2.10, cached_input: 0.07, effective_from: "2026-11-05" }
+    mistral-small:
+      - { input: 0.10, output: 0.30 }
+      - { input: 0.15, output: 0.60, effective_from: "2026-11-13" }
+    mistral-large-4:         { input: 0.70, output: 2.10, cached_input: 0.07 }
+    mistral-small-2603:      { input: 0.15, output: 0.60 }  # Mistral Small 4

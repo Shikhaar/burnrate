@@ -224,9 +224,9 @@ docs/            architecture, event schema, API contract, deployment, demo scri
 
 Burnrate is a complete, tested reference implementation, not yet a hosted service:
 
-- **Verified:** 101 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
+- **Verified:** 103 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
 - **Not yet built:** multi-tenant organizations, SSO, sending email (invite and reset links are copied and sent by the admin), distributed tracing, and a built-in scheduler for billing sync (use cron; see [deploy.md](docs/deploy.md)).
-- **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) should be verified against each provider's pricing page. The OpenAI billing, Cursor and GitHub Copilot connectors, and the Slack and Jira alert integrations, are tested against stand-ins built from each API's docs, not yet against the live services.
+- **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) were last checked against OpenAI, Anthropic, Google and Mistral's published prices on 2026-11-13; long-prompt surcharges and longer cache tiers are not modelled (see the file's header). The OpenAI billing, Cursor and GitHub Copilot connectors, and the Slack and Jira alert integrations, are tested against stand-ins built from each API's docs, not yet against the live services.
 
 ## Roadmap
 

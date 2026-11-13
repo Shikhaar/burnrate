@@ -51,8 +51,8 @@ def test_offset_timestamps_are_stored_as_utc(session):
     ("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"),
     ("gpt-4o-mini", "gpt-4o-mini"),
     ("o3-mini", None),            # not o3
-    ("gpt-5-pro", None),          # not gpt-5
-    ("claude-sonnet-4-6", None),  # not claude-sonnet-4
+    ("gpt-5-codex", None),        # not gpt-5
+    ("claude-sonnet-4-9", None),  # not claude-sonnet-4
     ("gpt-4o-realtime-preview", None),
 ])
 def test_only_snapshot_suffixes_inherit_a_price(session, model, expected):

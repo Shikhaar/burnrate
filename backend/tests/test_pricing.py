@@ -73,3 +73,25 @@ def test_same_money_across_dimensions_is_one_incident():
     assert sorted(primary["related"]) == ["model:sonnet", "project:support"]
     assert {(i["dimension"], i["key"], i["date"]) for i in out} == {
         ("feature", "triage", "2026-10-29"), ("model", "gpt-5", "2026-10-29"), ("feature", "triage", "2026-10-28")}
+
+
+def test_registry_file_accepts_dated_versions_per_model(tmp_path):
+    from burnrate.pricing import load_registry_file
+    f = tmp_path / "prices.yaml"
+    f.write_text(
+        "defaults: {effective_from: '2025-01-01'}\n"
+        "models:\n"
+        "  google:\n"
+        "    g-1: {input: 1, output: 2}\n"
+        "    g-2:\n"
+        "      - {input: 1, output: 2}\n"
+        "      - {input: 3, output: 4, effective_from: '2026-12-01'}\n"
+    )
+    rows = {(r["model"], r["effective_from"]): r["input_per_mtok"] for r in load_registry_file(f)}
+    assert rows == {("g-1", date(2025, 1, 1)): 1.0, ("g-2", date(2025, 1, 1)): 1.0, ("g-2", date(2026, 12, 1)): 3.0}
+
+
+def test_bundled_registry_has_no_duplicate_versions():
+    from burnrate.pricing import load_registry_file
+    keys = [(r["provider"], r["model"], r["effective_from"]) for r in load_registry_file()]
+    assert len(keys) == len(set(keys))
