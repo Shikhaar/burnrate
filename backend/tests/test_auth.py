@@ -126,7 +126,7 @@ def test_cli_user_commands(engine, monkeypatch, capsys):
     assert cli.main(["list-users"]) == 0
     assert "No users" in capsys.readouterr().out
     monkeypatch.setattr("sys.stdin", io.StringIO(PASSWORD + "\n"))
-    assert cli.main(["create-user", "ana@acme.io", "--name", "Ana", "--password-stdin"]) == 0
+    assert cli.main(["create-user", "ana@acme.io", "--name", "Ana", "--role", "admin", "--password-stdin"]) == 0
     monkeypatch.setattr("sys.stdin", io.StringIO("short\n"))
     assert cli.main(["reset-password", "ana@acme.io", "--password-stdin"]) == 1
     assert cli.main(["disable-user", "ana@acme.io"]) == 0

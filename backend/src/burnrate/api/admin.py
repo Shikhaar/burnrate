@@ -107,10 +107,12 @@ def update_user(user_id: int, body: UserPatch, request: Request, session: Sessio
         raise HTTPException(status.HTTP_409_CONFLICT, "You can't disable yourself or change your own role.")
     if not is_self:
         _require_superadmin_for(who, user.role, role)
-    was_super = user.role == "superadmin" and user.disabled_at is None and user.teams is None
-    stays_super = role == "superadmin" and not disabled and teams is None
-    if was_super and not stays_super and auth.active_superadmins(session) <= 1:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Keep at least one active super admin.")
+    if user.role == "superadmin" and (role != "superadmin" or disabled):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "There must always be a super admin. Make someone else the super admin first.")
+    handing_over = role == "superadmin" and user.role != "superadmin"
+    if handing_over and disabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Enable this user before making them the super admin.")
     was_admin = user.role in auth.ADMIN_ROLES and user.disabled_at is None and user.teams is None
     stays_admin = role in auth.ADMIN_ROLES and not disabled and teams is None
     if was_admin and not stays_admin and auth.active_admins(session) <= 1:
@@ -125,7 +127,14 @@ def update_user(user_id: int, body: UserPatch, request: Request, session: Sessio
         diff["role"] = {"old": user.role, "new": role}
     if teams != user.teams:
         diff["teams"] = {"old": user.teams, "new": teams}
-    user.role, user.teams = role, teams
+    previous = None
+    if handing_over:
+        try:
+            previous = auth.hand_over_superadmin(session, user)  # the old super admin becomes an admin
+        except ValueError as e:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from None
+    else:
+        user.role, user.teams = role, teams
     if disabled != (user.disabled_at is not None):
         diff["disabled"] = {"old": user.disabled_at is not None, "new": disabled}
         auth.set_disabled(session, user, disabled)  # commits; disabling also ends their sessions
@@ -145,6 +154,18 @@ def update_user(user_id: int, body: UserPatch, request: Request, session: Sessio
         details=diff,
         ip_address=get_client_ip(request),
     )
+    if previous is not None:
+        record_audit(
+            session,
+            action="user.update",
+            actor_type=act_type,
+            actor_email=act_email,
+            actor_id=act_id,
+            target_type="user",
+            target_id=str(previous.id),
+            details={"role": {"old": "superadmin", "new": "admin"}, "handed_over_to": user.email},
+            ip_address=get_client_ip(request),
+        )
     session.commit()
     return {"user": user_out(user)}
 

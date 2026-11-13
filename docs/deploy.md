@@ -56,13 +56,13 @@ disabled, which locks the dashboard rather than reopening it.
 ```bash
 burnrate create-user ana@acme.io --name "Ana"     # prompts twice; or pipe it with --password-stdin
 burnrate list-users                              # created, last sign-in, active/disabled
-burnrate set-role ana@acme.io superadmin         # promote or demote; refuses to remove the last super admin
+burnrate set-role ana@acme.io admin              # change a role; `superadmin` hands the one super admin role to them
 burnrate reset-password ana@acme.io              # also signs them out everywhere
 burnrate disable-user ana@acme.io                # blocks sign-in and ends their sessions
 burnrate enable-user ana@acme.io
 ```
 
-The first user you create is a super admin (later ones default to admin; pass `--role` to choose).
+The first user you create is the super admin (later ones default to admin; pass `--role` to choose).
 After that, admins manage everything from **Settings** in the dashboard:
 
 - **Users:** add someone with a role and, optionally, a set of teams. Burnrate shows a one-time link
@@ -74,8 +74,8 @@ After that, admins manage everything from **Settings** in the dashboard:
 
 | Role | Can |
 |---|---|
-| Super admin | Everything an admin can, plus adding, changing, disabling and resetting the password of admins and super admins. Always sees every team |
-| Admin | Users, API keys and settings, but only for members and viewers. Always sees every team |
+| Super admin (exactly one) | Everything an admin can, plus adding, changing, disabling and resetting the password of admins. Always sees every team |
+| Admin (any number) | Members and viewers, API keys, alerts, Jira, budgets and the audit log. Always sees every team |
 | Member | See spend, manage budgets, run an alert check |
 | Viewer | See spend; change nothing |
 
@@ -85,11 +85,13 @@ hidden). They can't see reconciliation (provider bills span every team) or the c
 history, and can only create budgets for their own teams. The CLI can set both:
 `burnrate create-user pat@acme.io --role viewer --teams search,support`.
 
-Only a super admin can manage admins, so an admin can't take over or lock out the people above
-them, and no one can change their own role. The API refuses to remove or demote the last active
-super admin, or the last admin of any kind. When you upgrade, the migration makes your earliest
-active all-teams admin the super admin; use `burnrate set-role` on the server to pick someone else.
-`BURNRATE_DASHBOARD_TOKEN` and the CLI act as a super admin.
+There is always exactly one super admin (the database enforces it), and only they can manage
+admins, so an admin can't take over or lock out the people above them. No one can change their own
+role. The super admin can't be demoted, disabled or given a second; instead they hand the role over:
+in Settings, edit someone and pick **Super admin**, or run `burnrate set-role <email> superadmin` on
+the server. The new super admin is promoted and the old one becomes an admin, in one step. When you
+upgrade, the migration makes your earliest active all-teams admin the super admin.
+`BURNRATE_DASHBOARD_TOKEN` and the CLI act as the super admin.
 
 ## Audit log
 

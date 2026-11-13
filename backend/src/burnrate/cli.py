@@ -33,13 +33,13 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("email")
     u.add_argument("--name")
     u.add_argument("--role", choices=["superadmin", "admin", "member", "viewer"],
-                   help="Default: superadmin if there's no active super admin yet, otherwise admin")
+                   help="Default: superadmin if there's no super admin yet, otherwise admin")
     u.add_argument("--teams", help="Comma-separated teams this user may see (default: all). Not for admins.")
     u.add_argument("--password-stdin", action="store_true", help="Read the password from stdin instead of prompting")
 
     sub.add_parser("list-users", help="List dashboard users")
 
-    sr = sub.add_parser("set-role", help="Change a user's role, e.g. make someone a super admin")
+    sr = sub.add_parser("set-role", help="Change a user's role; `superadmin` hands the one super admin role over")
     sr.add_argument("email")
     sr.add_argument("role", choices=["superadmin", "admin", "member", "viewer"])
 
@@ -201,7 +201,7 @@ def _users(session, args) -> int:
     if args.cmd == "create-user":
         try:
             teams = [t for t in args.teams.split(",")] if args.teams else None
-            role = args.role or ("superadmin" if not auth.active_superadmins(session) else "admin")
+            role = args.role or ("superadmin" if auth.current_superadmin(session) is None else "admin")
             user = auth.create_user(session, args.email, _read_password(args.password_stdin), args.name,
                                     role, teams)
             record_audit(
@@ -229,25 +229,31 @@ def _users(session, args) -> int:
         if old == args.role:
             print(f"{user.email} is already {old}.")
             return 0
-        if old == "superadmin" and user.disabled_at is None and auth.active_superadmins(session) <= 1:
-            print("That's the only active super admin. Make someone else a super admin first.", file=sys.stderr)
+        if old == "superadmin":
+            print("There must always be a super admin. Run `burnrate set-role <someone else> superadmin` to hand "
+                  "it over; this user then becomes an admin.", file=sys.stderr)
             return 1
         diff = {"role": {"old": old, "new": args.role}}
         if args.role in auth.ADMIN_ROLES and user.teams is not None:
             diff["teams"] = {"old": user.teams, "new": None}  # admins always see every team
-            user.teams = None
-        user.role = args.role
-        record_audit(
-            session,
-            action="user.update",
-            actor_type="cli",
-            actor_email="server command",
-            target_type="user",
-            target_id=str(user.id),
-            details=diff,
-        )
+        previous = None
+        if args.role == "superadmin":
+            try:
+                previous = auth.hand_over_superadmin(session, user)
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        else:
+            user.role = args.role
+            if args.role in auth.ADMIN_ROLES:
+                user.teams = None
+        for target, details in ((user, diff), (previous, {"role": {"old": "superadmin", "new": "admin"},
+                                                            "handed_over_to": user.email})):
+            if target is not None:
+                record_audit(session, action="user.update", actor_type="cli", actor_email="server command",
+                             target_type="user", target_id=str(target.id), details=details)
         session.commit()
-        print(f"{user.email}: {old} → {args.role}.")
+        print(f"{user.email}: {old} → {args.role}." + (f" {previous.email} is now an admin." if previous else ""))
     elif args.cmd == "reset-password":
         try:
             auth.set_password(session, user, _read_password(args.password_stdin))
@@ -267,6 +273,10 @@ def _users(session, args) -> int:
         print(f"Password updated for {user.email}; their existing sessions were signed out.")
     else:
         is_disable = args.cmd == "disable-user"
+        if is_disable and user.role == "superadmin":
+            print("Can't disable the super admin. Hand it over first with `burnrate set-role <someone> superadmin`.",
+                  file=sys.stderr)
+            return 1
         auth.set_disabled(session, user, is_disable)
         record_audit(
             session,

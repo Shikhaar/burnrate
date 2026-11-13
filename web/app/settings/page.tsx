@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { BellRing, Check, ChevronDown, ChevronRight, Copy, ExternalLink, KeyRound, Link2, Plus, Send, Ticket, Trash2, Unplug, UserPlus, Users, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { mutate as revalidate } from "swr";
 import { Badge, Button, Card, CardBody, CardHeader, DataState, EmptyState, PageHeader, Segmented, TableSkeleton } from "@/components/ui";
 import {
   ApiError,
@@ -32,10 +33,13 @@ import {
 } from "@/lib/api";
 import { isAdminRole, ROLE_HELP, ROLE_LABEL, useMe, usePermissions, type Role } from "@/lib/auth";
 
-/** Roles this person may hand out: admins can add members and viewers; super admins anything. */
-function useAssignableRoles(): Role[] {
+/** Roles this person may give: admins give member and viewer; the super admin also gives admin, and can
+ * hand their own role over (there is only ever one super admin). */
+function useAssignableRoles({ superAdminTaken }: { superAdminTaken: boolean }): Role[] {
   const perms = usePermissions();
-  return (Object.keys(ROLE_LABEL) as Role[]).filter((r) => perms.isSuperAdmin || !isAdminRole(r));
+  return (Object.keys(ROLE_LABEL) as Role[]).filter((r) =>
+    r === "superadmin" ? perms.isSuperAdmin && !superAdminTaken : perms.isSuperAdmin || !isAdminRole(r),
+  );
 }
 import { timestamp } from "@/lib/format";
 
@@ -500,6 +504,7 @@ function UsersTab() {
         <CardBody>
           {showForm ? (
             <InviteForm
+              superAdminTaken={Boolean(q.data?.items.some((u) => u.role === "superadmin"))}
               onInvited={async (l) => {
                 setShowForm(false);
                 showLink(l, false);
@@ -532,7 +537,8 @@ function UsersTab() {
           </dl>
           <p className="mt-3 text-xs text-muted">
             Limit a member or viewer to some teams and every page shows only those teams&apos; spend. They won&apos;t see provider bills or
-            company-wide alerts. Only a super admin can add, change, disable or reset the password of an admin or super admin.
+            company-wide alerts. Only the super admin can add, change, disable or reset the password of an admin. To pass the
+            super admin role on, edit someone and pick Super admin; you become an admin.
           </p>
         </CardBody>
       </Card>
@@ -583,12 +589,12 @@ function TeamPicker({ value, onChange }: { value: string[] | null; onChange: (v:
   );
 }
 
-function InviteForm({ onInvited }: { onInvited: (l: InviteLink) => Promise<void> }) {
+function InviteForm({ onInvited, superAdminTaken }: { onInvited: (l: InviteLink) => Promise<void>; superAdminTaken: boolean }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("member");
   const [teams, setTeams] = useState<string[] | null>(null);
-  const roles = useAssignableRoles();
+  const roles = useAssignableRoles({ superAdminTaken });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -651,7 +657,8 @@ function UserRow({ user: u, isMe, onChanged, onLink }: { user: AdminUser; isMe: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const perms = usePermissions();
-  const roles = useAssignableRoles();
+  // Picking "Super admin" for someone else hands the role over; the super admin can always offer it.
+  const roles = useAssignableRoles({ superAdminTaken: false });
   // Admins and super admins can only be changed by a super admin (the API enforces this too).
   const canManage = perms.isSuperAdmin || !isAdminRole(u.role);
 
@@ -672,7 +679,12 @@ function UserRow({ user: u, isMe, onChanged, onLink }: { user: AdminUser; isMe: 
 
   const save = async () => {
     if (!isAdminRole(role) && teams && teams.length === 0) return setError("Pick at least one team, or tick All teams.");
-    if (await act(() => updateUser(u.id, { role, teams: isAdminRole(role) ? null : teams }))) setEditing(false);
+    const handingOver = role === "superadmin" && u.role !== "superadmin";
+    if (handingOver && !window.confirm(`Make ${u.name || u.email} the super admin? There is only one, so you'll become an admin and can no longer manage admins.`)) return;
+    if (await act(() => updateUser(u.id, { role, teams: isAdminRole(role) ? null : teams }))) {
+      setEditing(false);
+      if (handingOver) await revalidate("/api/auth/me"); // your own role just changed
+    }
   };
 
   return (
@@ -718,7 +730,7 @@ function UserRow({ user: u, isMe, onChanged, onLink }: { user: AdminUser; isMe: 
             <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as Role)}>
               {roles.map((r) => (
                 <option key={r} value={r}>
-                  {ROLE_LABEL[r]}
+                  {r === "superadmin" && u.role !== "superadmin" ? "Super admin (hand over yours)" : ROLE_LABEL[r]}
                 </option>
               ))}
             </select>

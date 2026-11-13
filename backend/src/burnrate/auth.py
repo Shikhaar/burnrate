@@ -98,6 +98,8 @@ def create_user(session: Session, email: str, password: str | None, name: str | 
         raise ValueError(f"Role must be one of: {', '.join(ROLES)}.")
     if role in ADMIN_ROLES and teams is not None:
         raise ValueError("Admins always see every team.")
+    if role == "superadmin" and (holder := current_superadmin(session)) is not None:
+        raise ValueError(f"There can only be one super admin, and {holder.email} already is. Hand it over instead.")
     if password is not None:
         validate_password(password)
     if session.scalar(select(User).where(User.email == email)):
@@ -117,6 +119,27 @@ def active_admins(session: Session, roles: tuple[str, ...] | None = None) -> int
 
 def active_superadmins(session: Session) -> int:
     return active_admins(session, ("superadmin",))
+
+
+def current_superadmin(session: Session) -> User | None:
+    return session.scalar(select(User).where(User.role == "superadmin"))
+
+
+def hand_over_superadmin(session: Session, to: User) -> User | None:
+    """Make `to` the one super admin; the previous one becomes an admin. Returns the previous one.
+
+    Doesn't commit. The old holder is demoted and flushed first, so the one-super-admin index
+    never sees two at once.
+    """
+    if to.disabled_at is not None:
+        raise ValueError("Enable this user before making them the super admin.")
+    previous = current_superadmin(session)
+    if previous is not None and previous.id != to.id:
+        previous.role = "admin"
+        session.flush()
+    to.role, to.teams = "superadmin", None
+    session.flush()
+    return previous if previous is not None and previous.id != to.id else None
 
 
 INVITE_DAYS = 7
@@ -216,8 +239,9 @@ def user_for_session(session: Session, raw: str | None) -> User | None:
 
 # ---- roles and team scope -------------------------------------------------------------------------------
 ROLES = ("superadmin", "admin", "member", "viewer")
-# Both run Settings. Only a super admin can add, change, disable or reset the password of an admin or
-# super admin, so an admin can't take over or lock out the people above them.
+# Both run Settings. There is exactly one super admin, and only they can add, change, disable or reset
+# the password of an admin, so an admin can't take over or lock out the people above them. The super
+# admin role moves by hand-over: the new one is promoted and the old one becomes an admin.
 ADMIN_ROLES = ("superadmin", "admin")
 TEAM_SCOPE_KEY = "burnrate_teams"
 

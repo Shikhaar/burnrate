@@ -163,8 +163,9 @@ def test_only_super_admins_manage_admins(client, session):
                        headers=CSRF).status_code == 422
     ada = client.post("/api/users", json={"email": "ada@acme.io", "role": "admin"}, headers=CSRF).json()["user"]
     bo = client.post("/api/users", json={"email": "bo@acme.io", "role": "admin"}, headers=CSRF).json()["user"]
+    # There is only ever one super admin.
     assert client.post("/api/users", json={"email": "cy@acme.io", "role": "superadmin"},
-                       headers=CSRF).status_code == 201
+                       headers=CSRF).status_code == 422
     member = client.post("/api/users", json={"email": "mo@acme.io", "role": "member"}, headers=CSRF).json()["user"]
     root_id = me["id"]
 
@@ -188,16 +189,31 @@ def test_only_super_admins_manage_admins(client, session):
     assert client.patch(f"/api/users/{ada['id']}", json={"role": "superadmin"}, headers=CSRF).status_code == 409
 
 
-def test_last_super_admin_stays(client, session):
+def test_one_super_admin_handed_over_never_removed(client, session):
     root = auth.create_user(session, "root@acme.io", PASSWORD, role="superadmin")
-    auth.create_user(session, "ada@acme.io", PASSWORD, role="admin")
-    # Token access acts as a super admin, and still may not remove the only one.
+    ada = auth.create_user(session, "ada@acme.io", PASSWORD, role="admin")
+    mo = auth.create_user(session, "mo@acme.io", PASSWORD, role="member", teams=["search"])
+    with pytest.raises(ValueError, match="only be one super admin"):
+        auth.create_user(session, "cy@acme.io", PASSWORD, role="superadmin")
+    # Token access acts as the super admin, and still may not demote or disable them.
     assert client.patch(f"/api/users/{root.id}", json={"role": "admin"}, headers=ADMIN_TOKEN).status_code == 409
     assert client.patch(f"/api/users/{root.id}", json={"disabled": True}, headers=ADMIN_TOKEN).status_code == 409
-    second = auth.find_user(session, "ada@acme.io")
-    assert client.patch(f"/api/users/{second.id}", json={"role": "superadmin"},
-                        headers=ADMIN_TOKEN).status_code == 200
-    assert client.patch(f"/api/users/{root.id}", json={"role": "admin"}, headers=ADMIN_TOKEN).status_code == 200
+
+    # The super admin hands over from the dashboard: Ada is promoted, root becomes an admin.
+    client.cookies.clear()
+    assert client.post("/api/auth/login", json={"email": "root@acme.io", "password": PASSWORD}).status_code == 200
+    assert client.patch(f"/api/users/{ada.id}", json={"role": "superadmin"}, headers=CSRF).status_code == 200
+    session.expire_all()
+    assert [u.role for u in (root, ada)] == ["admin", "superadmin"]
+    assert client.get("/api/auth/me").json()["user"]["role"] == "admin"
+    assert client.patch(f"/api/users/{ada.id}", json={"role": "admin"}, headers=CSRF).status_code == 403
+    # Promoting a team-limited member also gives them every team.
+    assert client.patch(f"/api/users/{mo.id}", json={"role": "superadmin"}, headers=ADMIN_TOKEN).status_code == 200
+    session.expire_all()
+    assert (mo.role, mo.teams, ada.role) == ("superadmin", None, "admin")
+    actions = [r["details"] for r in client.get("/api/audit-logs", headers=ADMIN_TOKEN).json()["items"]
+               if r["details"].get("handed_over_to")]
+    assert {d["handed_over_to"] for d in actions} == {"ada@acme.io", "mo@acme.io"}
 
 
 def test_cli_first_user_is_super_admin_and_set_role(session, engine, monkeypatch):
@@ -214,11 +230,13 @@ def test_cli_first_user_is_super_admin_and_set_role(session, engine, monkeypatch
     session.expire_all()
     assert auth.find_user(session, "first@acme.io").role == "superadmin"
     assert auth.find_user(session, "second@acme.io").role == "admin"
-    assert cli.main(["set-role", "first@acme.io", "admin"]) == 1  # the only super admin
-    assert cli.main(["set-role", "second@acme.io", "superadmin"]) == 0
-    assert cli.main(["set-role", "first@acme.io", "viewer"]) == 0
+    assert cli.main(["create-user", "third@acme.io", "--role", "superadmin"]) == 1  # only one
+    assert cli.main(["set-role", "first@acme.io", "admin"]) == 1  # hand it over instead
+    assert cli.main(["disable-user", "first@acme.io"]) == 1
+    assert cli.main(["set-role", "second@acme.io", "superadmin"]) == 0  # hand-over
     session.expire_all()
-    assert [auth.find_user(session, e).role for e in ("first@acme.io", "second@acme.io")] == ["viewer", "superadmin"]
+    assert [auth.find_user(session, e).role for e in ("first@acme.io", "second@acme.io")] == ["admin", "superadmin"]
+    assert cli.main(["set-role", "first@acme.io", "viewer"]) == 0
 
 
 def test_editing_an_admin_keeps_them_counted(client, session):
@@ -226,3 +244,16 @@ def test_editing_an_admin_keeps_them_counted(client, session):
     assert client.patch(f"/api/users/{ada.id}", json={"name": "Ada"}, headers=ADMIN_TOKEN).status_code == 200
     session.expire_all()
     assert auth.active_admins(session) == 1
+
+
+def test_database_refuses_a_second_super_admin(session):
+    from sqlalchemy.exc import IntegrityError
+
+    from burnrate.models import User
+
+    session.add_all([User(email="a@acme.io", role="superadmin"), User(email="b@acme.io", role="superadmin")])
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+    session.add_all([User(email="c@acme.io", role="admin"), User(email="d@acme.io", role="admin")])
+    session.commit()  # any number of admins

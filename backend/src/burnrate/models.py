@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,13 +46,19 @@ class User(Base):
     """A dashboard user. Login is required on `/api/*` as soon as any user exists."""
 
     __tablename__ = "users"
+    # There is exactly one super admin; the database refuses a second even if two requests race.
+    __table_args__ = (
+        Index("uq_users_one_superadmin", "role", unique=True,
+              sqlite_where=text("role = 'superadmin'"), postgresql_where=text("role = 'superadmin'")),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(254), unique=True)  # stored lower-cased
     name: Mapped[str | None] = mapped_column(String(100))
     # Empty until an invited user sets their password; an empty hash can never match.
     password_hash: Mapped[str] = mapped_column(String(255), default="")
-    # admin: everything, incl. users, keys and settings · member: data + budgets · viewer: read-only
+    # superadmin (exactly one): everything · admin: users below admin, keys, settings ·
+    # member: data + budgets · viewer: read-only
     role: Mapped[str] = mapped_column(String(10), default="admin", server_default="admin")
     # None = every team. A list limits every page to usage events whose `team` is in it.
     teams: Mapped[list | None] = mapped_column(JSON(none_as_null=True))  # None = all teams, stored as SQL NULL

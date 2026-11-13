@@ -63,7 +63,7 @@ export function acceptInvite(token: string, password: string) {
 
 export const ROLE_LABEL: Record<Role, string> = { superadmin: "Super admin", admin: "Admin", member: "Member", viewer: "Viewer" };
 export const ROLE_HELP: Record<Role, string> = {
-  superadmin: "Everything, including adding and changing admins",
+  superadmin: "Exactly one. Everything, including adding and changing admins",
   admin: "Users, API keys and settings, but not other admins",
   member: "Sees spend and manages budgets",
   viewer: "Can look, can't change anything",
