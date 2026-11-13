@@ -36,7 +36,7 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Unified spend** | Every provider and model in one ledger, with daily trends and period-over-period change. |
 | **Attribution** | Slice by provider, model, project, feature, team, environment, customer or engineer. |
 | **Request log** | Per-call tokens (input / cached / cache-write / output / reasoning), cost, latency and status. Calls to models with no known price are flagged, never silently counted as $0. |
-| **Versioned pricing engine** | Price registry with `effective_from` versions and cache-read/cache-write rates. Dated snapshots resolve to their base model (`gpt-4o-2024-08-06` → `gpt-4o`), but different models never borrow a price (`o3-mini` is not `o3`). Repricing rewrites only derived data. |
+| **Versioned pricing engine** | Price registry covering current OpenAI, Anthropic, Google and Mistral models, with cache-read/cache-write rates and dated `effective_from` versions, so announced price changes take effect on their date and past costs never move. Dated snapshots resolve to their base model (`gpt-4o-2024-08-06` → `gpt-4o`), but different models never borrow a price (`o3-mini` is not `o3`). Repricing rewrites only derived data. |
 | **Billing reconciliation** | Pulls real charges from the OpenAI Costs API and Anthropic Cost Report. Flags providers whose bill drifts from the token-based estimate. |
 | **Forecasting** | Month-end projection from a 28-day trend × weekday seasonality, with a 90% confidence band. |
 | **Anomaly detection** | Robust z-score (median/MAD) per project, feature and model. When one problem shows up as several spikes (the same retry loop as a feature, model and project spike), it's reported as one incident. |
@@ -44,7 +44,7 @@ Burnrate answers these from one place. It doesn't sit in the request path, so no
 | **Coding-agent spend** | Point Claude Code's built-in OpenTelemetry export at Burnrate, and import Cursor and GitHub Copilot spend from their admin APIs, to see coding-tool spend per engineer, model and tool next to production spend. |
 | **Alerts** | Budget and anomaly alerts posted to Slack (or any Slack-style webhook) and, for serious ones, filed as Jira tickets (one per problem). Both are connected from Settings and checked before saving. The API checks every 15 minutes on its own; alerts are deduplicated and failed deliveries retried. |
 | **Audit log** | Who signed in, and who changed people, API keys, budgets or alert settings (from the dashboard or the server CLI), with before → after values. Secrets are never recorded. |
-| **Team access** | Admin, member and viewer roles. Limit anyone to their own teams and every page, filter and API call shows only those teams' spend. Invite people and manage API keys from Settings. |
+| **Team access** | Super admin, admin, member and viewer roles; only a super admin can add or change admins. Limit anyone to their own teams and every page, filter and API call shows only those teams' spend. Invite people and manage API keys from Settings. |
 | **Savings insights** | Ranked by estimated $/month: frontier models on light traffic, uncached long prompts, money spent on failed calls. |
 | **Ingestion** | Zero-dependency Python and TypeScript SDKs (background batching, retries, context-based attribution) with a LangChain callback handler and Vercel AI SDK middleware, an OTLP/HTTP receiver for OpenTelemetry GenAI spans, and a receiver for Claude Code's telemetry. Nothing sits in your request path. |
 | **Engineering** | Email and password sign-in (scrypt hashes, HttpOnly session cookies, CSRF protection, throttled failed logins), Slack and Jira credentials encrypted at rest with a key kept outside the database, idempotent ingestion that stays correct under concurrent writes (`ON CONFLICT DO NOTHING`), hashed API keys, per-key and per-IP rate limiting (shared across replicas via Redis), structured JSON logs with request IDs, Prometheus metrics, Alembic migrations, health checks, and CI that runs against SQLite, Postgres and the full Docker stack. |
@@ -76,9 +76,9 @@ The dashboard is open until you create the first login. After that, everyone has
 cd backend && .venv/bin/burnrate create-user you@company.com --name "Your Name"   # prompts for a password
 ```
 
-That first account is an admin. Everything else is done from **Settings** in the dashboard (admins only):
+That first account is a super admin. Everything else is done from **Settings** in the dashboard (admins only):
 
-- **Users:** add people with a role (admin, member, viewer) and, optionally, the teams they may see. Burnrate gives you a one-time link to send them.
+- **Users:** add people with a role (super admin, admin, member, viewer) and, optionally, the teams they may see. Burnrate gives you a one-time link to send them.
 - **API keys:** create a key for each app, see when each was last used, revoke one.
 - **Alerts:** connect a Slack channel and a Jira project. Burnrate tests each connection before saving it.
 
@@ -224,7 +224,7 @@ docs/            architecture, event schema, API contract, deployment, demo scri
 
 Burnrate is a complete, tested reference implementation, not yet a hosted service:
 
-- **Verified:** 103 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
+- **Verified:** 107 backend tests and SDK tests in both languages. The LangChain handler was also checked against `langchain-core` 1.7, and the AI SDK middleware against `ai` 5 and 6. CI runs ingestion against real Postgres and boots the whole Docker stack end to end.
 - **Not yet built:** multi-tenant organizations, SSO, sending email (invite and reset links are copied and sent by the admin), distributed tracing, and a built-in scheduler for billing sync (use cron; see [deploy.md](docs/deploy.md)).
 - **Check before relying on numbers:** model prices in [`pricing.yaml`](backend/src/burnrate/data/pricing.yaml) were last checked against OpenAI, Anthropic, Google and Mistral's published prices on 2026-11-13; long-prompt surcharges and longer cache tiers are not modelled (see the file's header). The OpenAI billing, Cursor and GitHub Copilot connectors, and the Slack and Jira alert integrations, are tested against stand-ins built from each API's docs, not yet against the live services.
 
@@ -237,6 +237,7 @@ Burnrate is a complete, tested reference implementation, not yet a hosted servic
 - Hosted demo
 - OpenTelemetry tracing for Burnrate itself
 - ClickHouse rollups for very high event volumes
+- Tiered prices: long-prompt surcharges and longer cache-write tiers (currently priced at the base tier)
 
 ## License
 

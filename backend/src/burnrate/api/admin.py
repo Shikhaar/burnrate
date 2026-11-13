@@ -36,6 +36,12 @@ def _invite(session: Session, user: User) -> dict:
 
 
 # ---- users -----------------------------------------------------------------------------------------------
+def _require_superadmin_for(who: Principal, *roles: str) -> None:
+    """Admins and super admins can only be added, changed or reset by a super admin."""
+    if who.role != "superadmin" and any(r in auth.ADMIN_ROLES for r in roles):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only super admins can add or change admins.")
+
+
 class UserIn(BaseModel):
     email: str = Field(..., max_length=254)
     name: str | None = Field(None, max_length=100)
@@ -58,6 +64,7 @@ def list_users(session: Session = Depends(get_session)) -> dict:
 @router.post("/users", status_code=status.HTTP_201_CREATED)
 def invite_user(body: UserIn, request: Request, session: Session = Depends(get_session),
                 who: Principal = Depends(require_admin)) -> dict:
+    _require_superadmin_for(who, body.role)
     try:
         user = auth.create_user(session, body.email, None, body.name, body.role, body.teams)
     except ValueError as e:
@@ -92,13 +99,20 @@ def update_user(user_id: int, body: UserPatch, request: Request, session: Sessio
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from None
     if role not in auth.ROLES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Role must be one of: {', '.join(auth.ROLES)}.")
-    if role == "admin":
+    if role in auth.ADMIN_ROLES:
         teams = None  # admins always see every team
     disabled = body.disabled if "disabled" in changes and body.disabled is not None else user.disabled_at is not None
-    if who.user is not None and who.user.id == user.id and (disabled or role != "admin"):
-        raise HTTPException(status.HTTP_409_CONFLICT, "You can't disable yourself or remove your own admin role.")
-    was_admin = user.role == "admin" and user.disabled_at is None and user.teams is None
-    stays_admin = role == "admin" and not disabled and teams is None
+    is_self = who.user is not None and who.user.id == user.id
+    if is_self and (disabled or role != user.role):
+        raise HTTPException(status.HTTP_409_CONFLICT, "You can't disable yourself or change your own role.")
+    if not is_self:
+        _require_superadmin_for(who, user.role, role)
+    was_super = user.role == "superadmin" and user.disabled_at is None and user.teams is None
+    stays_super = role == "superadmin" and not disabled and teams is None
+    if was_super and not stays_super and auth.active_superadmins(session) <= 1:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Keep at least one active super admin.")
+    was_admin = user.role in auth.ADMIN_ROLES and user.disabled_at is None and user.teams is None
+    stays_admin = role in auth.ADMIN_ROLES and not disabled and teams is None
     if was_admin and not stays_admin and auth.active_admins(session) <= 1:
         raise HTTPException(status.HTTP_409_CONFLICT, "Keep at least one active admin.")
 
@@ -142,6 +156,8 @@ def new_invite_link(user_id: int, request: Request, session: Session = Depends(g
     user = session.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+    if who.user is None or who.user.id != user.id:
+        _require_superadmin_for(who, user.role)  # a reset link for an admin would hand over their account
     if user.disabled_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Enable this user first.")
     act_type, act_email, act_id = actor_info(who)

@@ -56,13 +56,14 @@ disabled, which locks the dashboard rather than reopening it.
 ```bash
 burnrate create-user ana@acme.io --name "Ana"     # prompts twice; or pipe it with --password-stdin
 burnrate list-users                              # created, last sign-in, active/disabled
+burnrate set-role ana@acme.io superadmin         # promote or demote; refuses to remove the last super admin
 burnrate reset-password ana@acme.io              # also signs them out everywhere
 burnrate disable-user ana@acme.io                # blocks sign-in and ends their sessions
 burnrate enable-user ana@acme.io
 ```
 
-The first user you create is an admin. After that, admins manage everything from **Settings** in
-the dashboard:
+The first user you create is a super admin (later ones default to admin; pass `--role` to choose).
+After that, admins manage everything from **Settings** in the dashboard:
 
 - **Users:** add someone with a role and, optionally, a set of teams. Burnrate shows a one-time link
   (valid 7 days) for the admin to send; the person opens it and sets their own password. The same
@@ -73,7 +74,8 @@ the dashboard:
 
 | Role | Can |
 |---|---|
-| Admin | Everything, including users, API keys and settings. Always sees every team |
+| Super admin | Everything an admin can, plus adding, changing, disabling and resetting the password of admins and super admins. Always sees every team |
+| Admin | Users, API keys and settings, but only for members and viewers. Always sees every team |
 | Member | See spend, manage budgets, run an alert check |
 | Viewer | See spend; change nothing |
 
@@ -81,8 +83,13 @@ A member or viewer can be limited to some teams. Every page, filter list and `/a
 then filtered on the server to usage events whose `team` is one of theirs (events with no team are
 hidden). They can't see reconciliation (provider bills span every team) or the company-wide alert
 history, and can only create budgets for their own teams. The CLI can set both:
-`burnrate create-user pat@acme.io --role viewer --teams search,support`. Existing users become admins
-when you upgrade, and the API refuses to remove or demote the last unrestricted admin.
+`burnrate create-user pat@acme.io --role viewer --teams search,support`.
+
+Only a super admin can manage admins, so an admin can't take over or lock out the people above
+them, and no one can change their own role. The API refuses to remove or demote the last active
+super admin, or the last admin of any kind. When you upgrade, the migration makes your earliest
+active all-teams admin the super admin; use `burnrate set-role` on the server to pick someone else.
+`BURNRATE_DASHBOARD_TOKEN` and the CLI act as a super admin.
 
 ## Audit log
 
@@ -155,7 +162,7 @@ replica).
 
 The session cookie belongs to the API's host, so serve the dashboard and API from the **same site**,
 e.g. `burnrate.acme.com` and `api.burnrate.acme.com`, over HTTPS, and list the dashboard origin in
-`BURNRATE_CORS_ORIGINS`. Every signed-in user sees all data; there are no roles yet.
+`BURNRATE_CORS_ORIGINS`.
 
 ## Keys and access
 

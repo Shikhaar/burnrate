@@ -96,9 +96,8 @@ def test_invite_flow_and_admin_guards(client, session):
     assert body["user"]["invite_pending"] and body["invite_path"].startswith("/invite?token=")
     token = body["invite_path"].split("=", 1)[1]
     nia = body["user"]["id"]
-    # Admins can't be limited to teams; duplicates are rejected.
-    assert client.post("/api/users", json={"email": "x@acme.io", "role": "admin", "teams": ["a"]},
-                       headers=CSRF).status_code == 422
+    # Only super admins add admins; duplicates are rejected.
+    assert client.post("/api/users", json={"email": "x@acme.io", "role": "admin"}, headers=CSRF).status_code == 403
     assert client.post("/api/users", json={"email": "new@acme.io"}, headers=CSRF).status_code == 422
 
     # The new user can't sign in yet; the link sets their password and signs them in.
@@ -153,3 +152,77 @@ def test_only_revoked_keys_can_be_deleted(client, session):
     assert client.delete(f"/api/keys/{key['id']}", headers=ADMIN_TOKEN).status_code == 204
     assert client.get("/api/keys", headers=ADMIN_TOKEN).json()["items"] == []
     assert client.delete(f"/api/keys/{key['id']}", headers=ADMIN_TOKEN).status_code == 404
+
+
+def test_only_super_admins_manage_admins(client, session):
+    _sign_in_as(client, session, "root@acme.io", role="superadmin")
+    me = client.get("/api/auth/me").json()["user"]
+    assert me["role"] == "superadmin"
+    # Super admins add admins (never team-limited) and other super admins.
+    assert client.post("/api/users", json={"email": "x@acme.io", "role": "admin", "teams": ["a"]},
+                       headers=CSRF).status_code == 422
+    ada = client.post("/api/users", json={"email": "ada@acme.io", "role": "admin"}, headers=CSRF).json()["user"]
+    bo = client.post("/api/users", json={"email": "bo@acme.io", "role": "admin"}, headers=CSRF).json()["user"]
+    assert client.post("/api/users", json={"email": "cy@acme.io", "role": "superadmin"},
+                       headers=CSRF).status_code == 201
+    member = client.post("/api/users", json={"email": "mo@acme.io", "role": "member"}, headers=CSRF).json()["user"]
+    root_id = me["id"]
+
+    # Ada (admin) still runs Settings for members and viewers ...
+    auth.set_password(session, auth.find_user(session, "ada@acme.io"), PASSWORD)
+    client.cookies.clear()
+    assert client.post("/api/auth/login", json={"email": "ada@acme.io", "password": PASSWORD}).status_code == 200
+    assert client.get("/api/users").status_code == 200 and client.get("/api/keys").status_code == 200
+    assert client.patch(f"/api/users/{member['id']}", json={"role": "viewer"}, headers=CSRF).status_code == 200
+    assert client.post(f"/api/users/{member['id']}/invite", headers=CSRF).status_code == 200
+    assert client.patch(f"/api/users/{ada['id']}", json={"name": "Ada L"}, headers=CSRF).status_code == 200
+    # ... but can't add, promote, demote, disable or reset any admin or super admin.
+    for role in ("admin", "superadmin"):
+        assert client.post("/api/users", json={"email": f"{role}@acme.io", "role": role},
+                           headers=CSRF).status_code == 403
+        assert client.patch(f"/api/users/{member['id']}", json={"role": role}, headers=CSRF).status_code == 403
+    for target in (bo["id"], root_id):
+        assert client.patch(f"/api/users/{target}", json={"role": "viewer"}, headers=CSRF).status_code == 403
+        assert client.patch(f"/api/users/{target}", json={"disabled": True}, headers=CSRF).status_code == 403
+        assert client.post(f"/api/users/{target}/invite", headers=CSRF).status_code == 403
+    assert client.patch(f"/api/users/{ada['id']}", json={"role": "superadmin"}, headers=CSRF).status_code == 409
+
+
+def test_last_super_admin_stays(client, session):
+    root = auth.create_user(session, "root@acme.io", PASSWORD, role="superadmin")
+    auth.create_user(session, "ada@acme.io", PASSWORD, role="admin")
+    # Token access acts as a super admin, and still may not remove the only one.
+    assert client.patch(f"/api/users/{root.id}", json={"role": "admin"}, headers=ADMIN_TOKEN).status_code == 409
+    assert client.patch(f"/api/users/{root.id}", json={"disabled": True}, headers=ADMIN_TOKEN).status_code == 409
+    second = auth.find_user(session, "ada@acme.io")
+    assert client.patch(f"/api/users/{second.id}", json={"role": "superadmin"},
+                        headers=ADMIN_TOKEN).status_code == 200
+    assert client.patch(f"/api/users/{root.id}", json={"role": "admin"}, headers=ADMIN_TOKEN).status_code == 200
+
+
+def test_cli_first_user_is_super_admin_and_set_role(session, engine, monkeypatch):
+    from sqlalchemy.orm import sessionmaker
+
+    from burnrate import cli
+
+    monkeypatch.setattr(cli, "SessionLocal", sessionmaker(bind=engine, expire_on_commit=False))
+    monkeypatch.setattr(cli, "init_db", lambda: None)
+    monkeypatch.setattr(cli, "sync_registry", lambda s: None)
+    monkeypatch.setattr(cli, "_read_password", lambda _stdin: PASSWORD)
+    assert cli.main(["create-user", "first@acme.io"]) == 0
+    assert cli.main(["create-user", "second@acme.io"]) == 0
+    session.expire_all()
+    assert auth.find_user(session, "first@acme.io").role == "superadmin"
+    assert auth.find_user(session, "second@acme.io").role == "admin"
+    assert cli.main(["set-role", "first@acme.io", "admin"]) == 1  # the only super admin
+    assert cli.main(["set-role", "second@acme.io", "superadmin"]) == 0
+    assert cli.main(["set-role", "first@acme.io", "viewer"]) == 0
+    session.expire_all()
+    assert [auth.find_user(session, e).role for e in ("first@acme.io", "second@acme.io")] == ["viewer", "superadmin"]
+
+
+def test_editing_an_admin_keeps_them_counted(client, session):
+    ada = auth.create_user(session, "ada@acme.io", PASSWORD, role="admin")
+    assert client.patch(f"/api/users/{ada.id}", json={"name": "Ada"}, headers=ADMIN_TOKEN).status_code == 200
+    session.expire_all()
+    assert auth.active_admins(session) == 1

@@ -36,6 +36,10 @@ Ingestion (used by SDKs, not the dashboard): OTLP/HTTP JSON at `POST /v1/otlp/v1
 their teams, `403` on `/api/reconciliation` and `/api/alerts*`, and may only create or delete budgets
 scoped to `team=<one of theirs>`.
 
+`superadmin` and `admin` both use the admin endpoints below, but only a `superadmin` may create,
+change, disable or issue an invite/reset link for a user whose role is (or would become) `admin` or
+`superadmin`; anyone else gets `403`. The dashboard token acts as a `superadmin`.
+
 ## Admin only (`403` for members and viewers)
 
 | Method | Path | Response |
@@ -50,7 +54,7 @@ scoped to `team=<one of theirs>`.
 | POST | `/api/settings/jira/test` | creates one test ticket → `{key, url}` |
 | GET | `/api/users` | `{items:[{id,email,name,role,teams,created_at,last_login_at,disabled,invite_pending}]}` |
 | POST | `/api/users` | body `{email,name?,role,teams|null}` → `{user, invite_path, invite_expires_at}` |
-| PATCH | `/api/users/{id}` | body any of `{name,role,teams,disabled}` → `{user}`; `409` for changes that would remove the last admin or lock yourself out |
+| PATCH | `/api/users/{id}` | body any of `{name,role,teams,disabled}` → `{user}`; `409` for changes that would remove the last super admin or admin, or change your own role or disable you |
 | POST | `/api/users/{id}/invite` | new one-time link (invite or password reset) → `{user, invite_path, invite_expires_at}` |
 | GET | `/api/keys` | `{items:[{id,name,prefix,created_at,last_used_at,revoked_at}]}` |
 | POST | `/api/keys` | body `{name}` → `{key, secret}`; `secret` is the full key, returned only here |

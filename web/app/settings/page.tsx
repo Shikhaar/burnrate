@@ -30,7 +30,13 @@ import {
   type IngestKey,
   type InviteLink,
 } from "@/lib/api";
-import { ROLE_HELP, ROLE_LABEL, useMe, usePermissions, type Role } from "@/lib/auth";
+import { isAdminRole, ROLE_HELP, ROLE_LABEL, useMe, usePermissions, type Role } from "@/lib/auth";
+
+/** Roles this person may hand out: admins can add members and viewers; super admins anything. */
+function useAssignableRoles(): Role[] {
+  const perms = usePermissions();
+  return (Object.keys(ROLE_LABEL) as Role[]).filter((r) => perms.isSuperAdmin || !isAdminRole(r));
+}
 import { timestamp } from "@/lib/format";
 
 const TABS = [
@@ -516,7 +522,7 @@ function UsersTab() {
 
       <Card>
         <CardBody className="pt-4">
-          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
               <div key={r}>
                 <dt className="font-medium text-fg">{ROLE_LABEL[r]}</dt>
@@ -526,7 +532,7 @@ function UsersTab() {
           </dl>
           <p className="mt-3 text-xs text-muted">
             Limit a member or viewer to some teams and every page shows only those teams&apos; spend. They won&apos;t see provider bills or
-            company-wide alerts.
+            company-wide alerts. Only a super admin can add, change, disable or reset the password of an admin or super admin.
           </p>
         </CardBody>
       </Card>
@@ -582,6 +588,7 @@ function InviteForm({ onInvited }: { onInvited: (l: InviteLink) => Promise<void>
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("member");
   const [teams, setTeams] = useState<string[] | null>(null);
+  const roles = useAssignableRoles();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -591,7 +598,7 @@ function InviteForm({ onInvited }: { onInvited: (l: InviteLink) => Promise<void>
     setBusy(true);
     setError(null);
     try {
-      await onInvited(await inviteUser({ email, name: name || undefined, role, teams: role === "admin" ? null : teams }));
+      await onInvited(await inviteUser({ email, name: name || undefined, role, teams: isAdminRole(role) ? null : teams }));
     } catch (err) {
       setError(errorText(err, "Couldn't add this person."));
     } finally {
@@ -613,7 +620,7 @@ function InviteForm({ onInvited }: { onInvited: (l: InviteLink) => Promise<void>
         <label className="flex flex-col gap-1.5">
           <span className="text-xs font-medium text-fg-2">Role</span>
           <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+            {roles.map((r) => (
               <option key={r} value={r}>
                 {ROLE_LABEL[r]} — {ROLE_HELP[r]}
               </option>
@@ -621,7 +628,7 @@ function InviteForm({ onInvited }: { onInvited: (l: InviteLink) => Promise<void>
           </select>
         </label>
       </div>
-      {role !== "admin" ? (
+      {!isAdminRole(role) ? (
         <div>
           <p className="mb-1.5 text-xs font-medium text-fg-2">Can see</p>
           <TeamPicker value={teams} onChange={setTeams} />
@@ -643,6 +650,10 @@ function UserRow({ user: u, isMe, onChanged, onLink }: { user: AdminUser; isMe: 
   const [teams, setTeams] = useState<string[] | null>(u.teams);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const perms = usePermissions();
+  const roles = useAssignableRoles();
+  // Admins and super admins can only be changed by a super admin (the API enforces this too).
+  const canManage = perms.isSuperAdmin || !isAdminRole(u.role);
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -660,8 +671,8 @@ function UserRow({ user: u, isMe, onChanged, onLink }: { user: AdminUser; isMe: 
   };
 
   const save = async () => {
-    if (role !== "admin" && teams && teams.length === 0) return setError("Pick at least one team, or tick All teams.");
-    if (await act(() => updateUser(u.id, { role, teams: role === "admin" ? null : teams }))) setEditing(false);
+    if (!isAdminRole(role) && teams && teams.length === 0) return setError("Pick at least one team, or tick All teams.");
+    if (await act(() => updateUser(u.id, { role, teams: isAdminRole(role) ? null : teams }))) setEditing(false);
   };
 
   return (
@@ -678,17 +689,17 @@ function UserRow({ user: u, isMe, onChanged, onLink }: { user: AdminUser; isMe: 
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone={u.role === "admin" ? "accent" : "neutral"}>{ROLE_LABEL[u.role]}</Badge>
+          <Badge tone={isAdminRole(u.role) ? "accent" : "neutral"}>{ROLE_LABEL[u.role]}</Badge>
           <Badge>{u.teams ? u.teams.join(", ") : "All teams"}</Badge>
           {u.disabled ? <Badge tone="bad">Disabled</Badge> : u.invite_pending ? <Badge tone="warn">Invited</Badge> : null}
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {!u.disabled ? (
+          {!u.disabled && (canManage || isMe) ? (
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => void act(async () => onLink(await newInviteLink(u.id)))}>
               <Link2 className="size-3.5" aria-hidden /> {u.invite_pending ? "New invite link" : "Reset password"}
             </Button>
           ) : null}
-          {!isMe ? (
+          {!isMe && canManage ? (
             <>
               <Button size="sm" variant="ghost" disabled={busy} onClick={() => setEditing((v) => !v)}>
                 {editing ? "Cancel" : "Edit"}
@@ -705,14 +716,14 @@ function UserRow({ user: u, isMe, onChanged, onLink }: { user: AdminUser; isMe: 
           <label className="flex max-w-xs flex-col gap-1.5">
             <span className="text-xs font-medium text-fg-2">Role</span>
             <select className={inputCls} value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+              {roles.map((r) => (
                 <option key={r} value={r}>
                   {ROLE_LABEL[r]}
                 </option>
               ))}
             </select>
           </label>
-          {role !== "admin" ? <TeamPicker value={teams} onChange={setTeams} /> : <p className="text-xs text-muted">Admins always see every team.</p>}
+          {!isAdminRole(role) ? <TeamPicker value={teams} onChange={setTeams} /> : <p className="text-xs text-muted">Admins always see every team.</p>}
           <Button size="sm" variant="primary" disabled={busy} onClick={() => void save()}>
             {busy ? "Saving…" : "Save"}
           </Button>

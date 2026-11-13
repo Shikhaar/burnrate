@@ -418,7 +418,7 @@ export interface AdminUser {
   id: number;
   email: string;
   name: string | null;
-  role: "admin" | "member" | "viewer";
+  role: "superadmin" | "admin" | "member" | "viewer";
   teams: string[] | null;
   created_at: string;
   last_login_at: string | null;

@@ -96,7 +96,7 @@ def create_user(session: Session, email: str, password: str | None, name: str | 
         raise ValueError("Enter a valid email address.")
     if role not in ROLES:
         raise ValueError(f"Role must be one of: {', '.join(ROLES)}.")
-    if role == "admin" and teams is not None:
+    if role in ADMIN_ROLES and teams is not None:
         raise ValueError("Admins always see every team.")
     if password is not None:
         validate_password(password)
@@ -109,8 +109,14 @@ def create_user(session: Session, email: str, password: str | None, name: str | 
     return user
 
 
-def active_admins(session: Session) -> int:
-    return session.query(User).filter(User.role == "admin", User.disabled_at.is_(None), User.teams.is_(None)).count()
+def active_admins(session: Session, roles: tuple[str, ...] | None = None) -> int:
+    """Enabled users with one of `roles` (default: admins and super admins) who see every team."""
+    return session.query(User).filter(User.role.in_(roles or ADMIN_ROLES), User.disabled_at.is_(None),
+                                      User.teams.is_(None)).count()
+
+
+def active_superadmins(session: Session) -> int:
+    return active_admins(session, ("superadmin",))
 
 
 INVITE_DAYS = 7
@@ -209,7 +215,10 @@ def user_for_session(session: Session, raw: str | None) -> User | None:
 
 
 # ---- roles and team scope -------------------------------------------------------------------------------
-ROLES = ("admin", "member", "viewer")
+ROLES = ("superadmin", "admin", "member", "viewer")
+# Both run Settings. Only a super admin can add, change, disable or reset the password of an admin or
+# super admin, so an admin can't take over or lock out the people above them.
+ADMIN_ROLES = ("superadmin", "admin")
 TEAM_SCOPE_KEY = "burnrate_teams"
 
 
@@ -230,8 +239,8 @@ class Principal:
         return {"role": self.role, "teams": list(self.teams) if self.teams is not None else None}
 
 
-TOKEN_ADMIN = Principal(user=None, role="admin", teams=None, via="token")
-OPEN_ADMIN = Principal(user=None, role="admin", teams=None, via="open")
+TOKEN_ADMIN = Principal(user=None, role="superadmin", teams=None, via="token")
+OPEN_ADMIN = Principal(user=None, role="superadmin", teams=None, via="open")
 
 
 def principal_for(user: User) -> Principal:
@@ -289,7 +298,7 @@ def require_dashboard_access(
 
 
 def require_admin(who: Principal = Depends(require_dashboard_access)) -> Principal:
-    if who.role != "admin":
+    if who.role not in ADMIN_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only admins can do this")
     return who
 

@@ -32,11 +32,16 @@ def main(argv: list[str] | None = None) -> int:
     u = sub.add_parser("create-user", help="Create a dashboard login (login becomes required once one exists)")
     u.add_argument("email")
     u.add_argument("--name")
-    u.add_argument("--role", choices=["admin", "member", "viewer"], default="admin")
+    u.add_argument("--role", choices=["superadmin", "admin", "member", "viewer"],
+                   help="Default: superadmin if there's no active super admin yet, otherwise admin")
     u.add_argument("--teams", help="Comma-separated teams this user may see (default: all). Not for admins.")
     u.add_argument("--password-stdin", action="store_true", help="Read the password from stdin instead of prompting")
 
     sub.add_parser("list-users", help="List dashboard users")
+
+    sr = sub.add_parser("set-role", help="Change a user's role, e.g. make someone a super admin")
+    sr.add_argument("email")
+    sr.add_argument("role", choices=["superadmin", "admin", "member", "viewer"])
 
     rp = sub.add_parser("reset-password", help="Set a new password for a user and sign them out everywhere")
     rp.add_argument("email")
@@ -128,7 +133,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             session.commit()
             print(f"Revoked: {_key_row(key)}")
-        elif args.cmd in ("create-user", "list-users", "reset-password", "disable-user", "enable-user"):
+        elif args.cmd in ("create-user", "list-users", "set-role", "reset-password", "disable-user",
+                          "enable-user"):
             return _users(session, args)
         elif args.cmd == "pricing":
             added = sync_registry(session, args.file) if args.file else 0
@@ -189,14 +195,15 @@ def _users(session, args) -> int:
             teams = ",".join(user.teams) if user.teams is not None else "all teams"
             if not user.password_hash:
                 state += " (invite pending)"
-            print(f"{user.id:>4}  {user.email:<32}  {user.name or '':<20}  {user.role:<6}  {teams:<20}  "
+            print(f"{user.id:>4}  {user.email:<32}  {user.name or '':<20}  {user.role:<10}  {teams:<20}  "
                   f"last sign-in {_when(user.last_login_at)}  {state}")
         return 0
     if args.cmd == "create-user":
         try:
             teams = [t for t in args.teams.split(",")] if args.teams else None
+            role = args.role or ("superadmin" if not auth.active_superadmins(session) else "admin")
             user = auth.create_user(session, args.email, _read_password(args.password_stdin), args.name,
-                                    args.role, teams)
+                                    role, teams)
             record_audit(
                 session,
                 action="user.create",
@@ -210,14 +217,38 @@ def _users(session, args) -> int:
         except ValueError as e:
             print(e, file=sys.stderr)
             return 1
-        print(f"Created {user.email}. The dashboard now requires signing in.")
+        print(f"Created {user.email} ({user.role}). The dashboard now requires signing in.")
         return 0
 
     user = auth.find_user(session, args.email)
     if user is None:
         print(f"No user with email {auth.normalize_email(args.email)}.", file=sys.stderr)
         return 1
-    if args.cmd == "reset-password":
+    if args.cmd == "set-role":
+        old = user.role
+        if old == args.role:
+            print(f"{user.email} is already {old}.")
+            return 0
+        if old == "superadmin" and user.disabled_at is None and auth.active_superadmins(session) <= 1:
+            print("That's the only active super admin. Make someone else a super admin first.", file=sys.stderr)
+            return 1
+        diff = {"role": {"old": old, "new": args.role}}
+        if args.role in auth.ADMIN_ROLES and user.teams is not None:
+            diff["teams"] = {"old": user.teams, "new": None}  # admins always see every team
+            user.teams = None
+        user.role = args.role
+        record_audit(
+            session,
+            action="user.update",
+            actor_type="cli",
+            actor_email="server command",
+            target_type="user",
+            target_id=str(user.id),
+            details=diff,
+        )
+        session.commit()
+        print(f"{user.email}: {old} → {args.role}.")
+    elif args.cmd == "reset-password":
         try:
             auth.set_password(session, user, _read_password(args.password_stdin))
             record_audit(

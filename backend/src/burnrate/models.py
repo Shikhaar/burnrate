@@ -54,7 +54,7 @@ class User(Base):
     # admin: everything, incl. users, keys and settings · member: data + budgets · viewer: read-only
     role: Mapped[str] = mapped_column(String(10), default="admin", server_default="admin")
     # None = every team. A list limits every page to usage events whose `team` is in it.
-    teams: Mapped[list | None] = mapped_column(JSON)
+    teams: Mapped[list | None] = mapped_column(JSON(none_as_null=True))  # None = all teams, stored as SQL NULL
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
