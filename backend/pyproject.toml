@@ -10,22 +10,22 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-  "fastapi>=0.162.0",
+  "fastapi>=0.162.5",
   "uvicorn[standard]>=0.54.0",
-  "sqlalchemy>=2.1.6",
-  "pydantic>=2.14.1",
+  "sqlalchemy>=2.1.8",
+  "pydantic>=2.14.3",
   "pydantic-settings>=2.16.2",
   "httpx>=0.28.1",
   "pyyaml>=6.0.3",
-  "psycopg[binary]>=3.3.6",
+  "psycopg[binary]>=3.3.8",
   "alembic>=1.20.1",
   "prometheus-client>=0.26.0",
   "redis>=8.1.0",
-  "cryptography>=50.0.0",  # encrypts secrets saved from the dashboard (Slack link, Jira token)
+  "cryptography>=50.0.2",  # encrypts secrets saved from the dashboard (Slack link, Jira token)
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.2.0", "ruff>=0.17.3", "fakeredis[lua]>=2.40.0"]
+dev = ["pytest>=9.2.0", "ruff>=0.17.4", "fakeredis[lua]>=2.40.0"]
 
 [project.scripts]
 burnrate = "burnrate.cli:main"
