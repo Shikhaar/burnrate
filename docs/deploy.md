@@ -44,6 +44,9 @@ state lives in Postgres.
 | `BURNRATE_OPENAI_ADMIN_KEY` / `BURNRATE_ANTHROPIC_ADMIN_KEY` | Billing sync for reconciliation. Full admin keys: see [Keys and access](#keys-and-access) |
 | `BURNRATE_CURSOR_ADMIN_KEY` | Cursor team admin API key; `burnrate sync cursor` imports per-request usage. Full admin key |
 | `BURNRATE_GITHUB_TOKEN` / `BURNRATE_GITHUB_ORG` | Token of an org owner or billing manager, and the org; `burnrate sync copilot` imports Copilot spend |
+| `BURNRATE_LITELLM_URL` / `BURNRATE_LITELLM_API_KEY` | LiteLLM proxy URL and a key that can read spend logs; `burnrate sync litellm` imports its calls |
+| `BURNRATE_TRACE_URL_TEMPLATE` | Link from each trace to where its prompts are, e.g. `https://phoenix.internal/projects/default/traces/{trace_id}`. Langfuse imports link to Langfuse without it |
+| `BURNRATE_LANGFUSE_PUBLIC_KEY` / `BURNRATE_LANGFUSE_SECRET_KEY` / `BURNRATE_LANGFUSE_HOST` | A Langfuse project's API keys, and its host (default `https://cloud.langfuse.com`; US is `https://us.cloud.langfuse.com`; self-hosted needs v4+); `burnrate sync langfuse` imports its generations |
 
 The admin keys are only needed by `burnrate sync`. Leave them off the API service; see below.
 
@@ -192,15 +195,17 @@ usage reports), but the keys themselves are not read-only:
 | Anthropic admin key | Cost report | Manage the organization: members, workspaces, API keys |
 | Cursor admin API key | Usage events | Manage team settings such as members' spend limits |
 | GitHub token | Billing usage report | Only what you grant: use a fine-grained token with the least org access the billing usage endpoint accepts (GitHub's docs for that endpoint list it) |
+| LiteLLM key | `GET /spend/logs/v2` | Depends on its role. Use the key of a `proxy_admin_viewer` user, which can read spend but change nothing; a master key can manage the whole proxy |
+| Langfuse project keys | `GET /api/public/v2/observations`, `GET /api/public/projects` | Read and write everything in that Langfuse project, prompts included. Burnrate asks only for usage, model and metadata fields, never inputs or outputs |
 
-Treat the first three like root credentials:
+Treat all but a read-only GitHub or LiteLLM viewer key like root credentials:
 
 - **Keep them off the API service.** The web-facing API never uses them. Run `burnrate sync` as its
   own scheduled job (same image, different command) and give only that job the keys.
 - **Inject them from a secrets manager** (AWS Secrets Manager, Vault, Kubernetes secrets, your
   platform's secret store) as environment variables. Burnrate never writes them to its database.
 - **Skip them if you don't need them.** Without them you lose billing reconciliation and the
-  Cursor/Copilot import; SDK, OpenTelemetry and Claude Code ingestion are unaffected.
+  Cursor, Copilot, LiteLLM and Langfuse imports; SDK, OpenTelemetry and Claude Code ingestion are unaffected.
 - **Rotate them on the provider's side** if one may have leaked; revoking there takes effect at once.
 
 ## Logging and rate limits
@@ -239,7 +244,7 @@ Alerts need no scheduler: the API checks on its own (see [Alerts](#alerts)). Run
 coding-tool sync from cron, a platform scheduler, or a Kubernetes CronJob using the API image:
 
 ```
-0 6 * * *     burnrate sync all --days 7   # billed costs + Cursor/Copilot usage (configured connectors only)
+0 6 * * *     burnrate sync all --days 7   # bills + Cursor/Copilot/LiteLLM/Langfuse usage (configured connectors only)
 ```
 
 Give the admin keys only to the `burnrate sync` job, not to the API service (see [Keys and access](#keys-and-access)).

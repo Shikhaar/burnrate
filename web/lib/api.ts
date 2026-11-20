@@ -104,7 +104,100 @@ export interface UsageEvent {
   status: EventStatus;
   /** How cost_usd was derived. */
   pricing?: "priced" | "provider_reported" | "unpriced";
+  trace_id?: string | null;
 }
+
+/** Score values by name: numbers (booleans as 0/1, averaged) or a category label. */
+export type ScoreMap = Record<string, number | string>;
+
+export interface TraceRow {
+  trace_id: string;
+  name: string;
+  project: string | null;
+  customer_id: string | null;
+  user_id: string | null;
+  started_at: string;
+  duration_ms: number;
+  calls: number;
+  cost_usd: number;
+  tokens: number;
+  errors: number;
+  models: string[];
+  /** Step names in order (first 12). */
+  steps: string[];
+  scores: ScoreMap;
+  link: string | null;
+}
+
+export interface TraceWorkflow {
+  name: string;
+  traces: number;
+  cost_usd: number;
+  avg_cost_usd: number;
+  avg_calls: number;
+  failed_share: number;
+  scores: Record<string, number>;
+}
+
+export interface TracesPage {
+  window: { start: string; end: string; days: number };
+  summary: { traces: number; cost_usd: number; avg_cost_usd: number; avg_calls: number };
+  workflows: TraceWorkflow[];
+  total: number;
+  items: TraceRow[];
+}
+
+export interface TraceStep {
+  id: number;
+  request_id: string | null;
+  timestamp: string;
+  offset_ms: number;
+  latency_ms: number | null;
+  provider: string;
+  model: string;
+  operation: string;
+  feature: string | null;
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  cost_share: number;
+  pricing: "priced" | "provider_reported" | "unpriced";
+  status: EventStatus;
+  /** Same step on the same model as the one before: a retry or a loop. */
+  repeat: boolean;
+}
+
+export interface TraceDetail {
+  trace_id: string;
+  name: string;
+  project: string;
+  team: string | null;
+  environment: string;
+  customer_id: string | null;
+  user_id: string | null;
+  started_at: string;
+  duration_ms: number;
+  calls: number;
+  cost_usd: number;
+  errors: number;
+  repeats: number;
+  top_step: string | null;
+  link: string | null;
+  steps: TraceStep[];
+  scores: { name: string; data_type: string; value: number | null; label: string | null; source: string; timestamp: string }[];
+}
+
+export type TracesQuery = {
+  days: number;
+  limit: number;
+  offset: number;
+  sort: "cost" | "recent" | "calls";
+  project?: string;
+  customer?: string;
+  errors?: boolean;
+};
 
 export interface EventsPage {
   total: number;
@@ -367,6 +460,8 @@ export const paths = {
   insights: () => "/api/insights",
   pricing: () => "/api/pricing",
   alerts: (days: number) => buildPath("/api/alerts", { days }),
+  traces: (q: TracesQuery) => buildPath("/api/traces", { ...q, errors: q.errors ? "true" : undefined }),
+  trace: (id: string) => `/api/traces/${encodeURIComponent(id)}`,
 };
 
 export const useMeta = () => useApi<Meta>(paths.meta());
@@ -383,6 +478,8 @@ export const useInsights = () => useApi<InsightsResponse>(paths.insights());
 export const usePricing = () => useApi<PricingResponse>(paths.pricing());
 
 export const useAlerts = (days: number) => useApi<AlertsResponse>(paths.alerts(days));
+export const useTraces = (q: TracesQuery) => useApi<TracesPage>(paths.traces(q));
+export const useTrace = (id: string | null) => useApi<TraceDetail>(id ? paths.trace(id) : null);
 export const evaluateAlerts = () => request<{ fired: number }>("/api/alerts/evaluate", { method: "POST" });
 
 export const createBudget = (body: BudgetCreate) =>

@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, FilterX } from "lucide-react";
+import { ChevronLeft, ChevronRight, FilterX, Waypoints } from "lucide-react";
+import Link from "next/link";
 import { Badge, Button, Card, CardBody, DataState, Dot, EmptyState, PageHeader, Select, Table, TableSkeleton, Td, Th } from "@/components/ui";
 import { useEvents, useMeta, type UsageEvent } from "@/lib/api";
 import { providerColor, providerLabel } from "@/lib/colors";
@@ -168,7 +169,19 @@ export default function RequestsPage() {
                           {e.project ?? <span className="text-subtle">—</span>}
                           {e.environment ? <span className="ml-1.5 text-[11px] text-subtle">{e.environment}</span> : null}
                         </Td>
-                        <Td className="hidden text-fg-2 lg:table-cell">{e.feature ?? <span className="text-subtle">—</span>}</Td>
+                        <Td className="hidden text-fg-2 lg:table-cell">
+                          {e.feature ?? <span className="text-subtle">—</span>}
+                          {e.trace_id ? (
+                            <Link
+                              href={`/traces?trace=${encodeURIComponent(e.trace_id)}`}
+                              className="ml-1.5 inline-flex align-middle text-subtle hover:text-accent"
+                              title="Open this call's trace"
+                              aria-label="Open this call's trace"
+                            >
+                              <Waypoints className="size-3.5" aria-hidden />
+                            </Link>
+                          ) : null}
+                        </Td>
                         <Td align="right" className="text-fg-2">
                           {num(e.input_tokens)}
                         </Td>

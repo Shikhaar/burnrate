@@ -59,8 +59,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("file", type=Path, nargs="?")
     p.add_argument("--since", type=date.fromisoformat)
 
-    c = sub.add_parser("sync", help="Pull billed costs (openai, anthropic) or coding-tool usage (cursor, copilot)")
-    c.add_argument("provider", choices=["openai", "anthropic", "cursor", "copilot", "all"])
+    c = sub.add_parser("sync", help="Pull billed costs (openai, anthropic), coding-tool usage (cursor, copilot) "
+                                    "or calls logged in an LLM gateway (litellm, langfuse)")
+    c.add_argument("provider", choices=["openai", "anthropic", "cursor", "copilot", "litellm", "langfuse", "all"])
     c.add_argument("--days", type=int, default=31)
 
     sub.add_parser("alerts", help="Evaluate budgets/anomalies and send new alerts to the webhook")
@@ -149,14 +150,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{len(fired)} new alert(s).")
         elif args.cmd == "sync":
             from burnrate.config import get_settings
-            from burnrate.connectors import FETCHERS, USAGE_PROVIDERS, sync_billing, sync_usage
+            from burnrate.connectors import FETCHERS, USAGE_PROVIDERS, sync_billing, sync_langfuse_scores, sync_usage
 
             start = datetime.now(UTC).date() - timedelta(days=args.days)
             if args.provider == "all":
                 # "all" covers whatever is configured, so a missing key skips that provider.
                 s = get_settings()
                 configured = {"openai": s.openai_admin_key, "anthropic": s.anthropic_admin_key,
-                              "cursor": s.cursor_admin_key, "copilot": s.github_token and s.github_org}
+                              "cursor": s.cursor_admin_key, "copilot": s.github_token and s.github_org,
+                              "litellm": s.litellm_url and s.litellm_api_key,
+                              "langfuse": s.langfuse_public_key and s.langfuse_secret_key}
                 providers = [p for p in (*FETCHERS, *USAGE_PROVIDERS) if configured[p]]
                 if not providers:
                     raise SystemExit("No connector is configured; see `burnrate sync --help` and docs/deploy.md.")
@@ -166,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
                 if name in USAGE_PROVIDERS:
                     r = sync_usage(session, name, start)
                     print(f"{name}: imported {r.accepted} usage events ({r.duplicates} already present)")
+                    if name == "langfuse":
+                        sc = sync_langfuse_scores(session, start)
+                        print(f"langfuse: imported {sc.accepted} trace scores ({sc.duplicates} already present)")
                 else:
                     rows = sync_billing(session, name, start)
                     print(f"{name}: upserted {rows} billed-cost rows")

@@ -5,9 +5,10 @@ from burnrate.config import get_settings
 from burnrate.db import get_session
 from burnrate.metrics import EVENTS_INGESTED
 from burnrate.otel import metrics_to_events, spans_to_events
-from burnrate.schemas import EventBatchIn, IngestResult
+from burnrate.schemas import EventBatchIn, IngestResult, ScoreBatchIn
 from burnrate.security import require_ingest_key
 from burnrate.services.ingest import ingest_events
+from burnrate.services.traces import ingest_scores
 
 router = APIRouter(prefix="/v1", tags=["ingest"], dependencies=[Depends(require_ingest_key)])
 
@@ -20,6 +21,12 @@ def post_events(batch: EventBatchIn, session: Session = Depends(get_session)) ->
             f"Batch exceeds {get_settings().max_batch_size} events; split it.",
         )
     return ingest_events(session, batch.events)
+
+
+@router.post("/scores", response_model=IngestResult, status_code=status.HTTP_202_ACCEPTED)
+def post_scores(batch: ScoreBatchIn, session: Session = Depends(get_session)) -> IngestResult:
+    """Quality scores for traces (eval results, thumbs up/down, labels), shown next to each trace's cost."""
+    return ingest_scores(session, batch.scores)
 
 
 @router.post("/otlp/v1/traces", response_model=IngestResult, status_code=status.HTTP_202_ACCEPTED)

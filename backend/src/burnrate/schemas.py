@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Token columns are 32-bit on Postgres; no single call comes close to this.
 MAX_TOKENS = 2**31 - 1
@@ -78,3 +78,24 @@ class BudgetIn(BaseModel):
     scope_value: str | None = Field(None, max_length=120)
     monthly_limit_usd: float = Field(..., gt=0)
     alert_threshold: float = Field(0.8, gt=0, le=1)
+
+
+class ScoreIn(BaseModel):
+    """A quality score for a trace: an eval result, a user's thumbs up, a reviewer's label."""
+
+    trace_id: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1, max_length=100)
+    value: float | bool | None = Field(None, description="Numbers and booleans (true = 1). Omit for a label.")
+    label: str | None = Field(None, max_length=100, description="A category, e.g. 'resolved' or 'escalated'.")
+    id: str | None = Field(None, max_length=128, description="Idempotency key; re-sent scores are skipped.")
+    timestamp: datetime | None = None
+
+    @model_validator(mode="after")
+    def _value_or_label(self):
+        if self.value is None and not self.label:
+            raise ValueError("Send a value or a label.")
+        return self
+
+
+class ScoreBatchIn(BaseModel):
+    scores: list[ScoreIn] = Field(..., max_length=1000)

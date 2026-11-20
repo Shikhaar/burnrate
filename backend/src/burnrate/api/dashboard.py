@@ -8,7 +8,7 @@ from burnrate.auth import Principal, require_dashboard_access, require_unscoped
 from burnrate.db import get_session
 from burnrate.models import Budget, PriceEntry
 from burnrate.schemas import BudgetIn, Dimension
-from burnrate.services import alerts, analytics, anomalies, budgets, forecast, insights, reconciliation
+from burnrate.services import alerts, analytics, anomalies, budgets, forecast, insights, reconciliation, traces
 from burnrate.services.audit import actor_info, get_client_ip, record_audit
 
 router = APIRouter(prefix="/api", tags=["dashboard"], dependencies=[Depends(require_dashboard_access)])
@@ -54,6 +54,31 @@ def get_events(
 ) -> dict:
     filters = {"provider": provider, "model": model, "project": project, "feature": feature, "customer": customer}
     return analytics.list_events(session, limit, offset, filters)
+
+
+@router.get("/traces")
+def get_traces(
+    session: SessionDep,
+    days: Days = 7,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    sort: Annotated[str, Query(pattern="^(cost|recent|calls)$")] = "cost",
+    project: str | None = None,
+    feature: str | None = None,
+    customer: str | None = None,
+    team: str | None = None,
+    errors: bool = False,
+) -> dict:
+    filters = {"project": project, "feature": feature, "customer": customer, "team": team}
+    return traces.list_traces(session, days, limit, offset, sort, filters, errors_only=errors)
+
+
+@router.get("/traces/{trace_id}")
+def get_trace(trace_id: str, session: SessionDep) -> dict:
+    trace = traces.get_trace(session, trace_id)
+    if trace is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Trace not found")
+    return trace
 
 
 @router.get("/anomalies")

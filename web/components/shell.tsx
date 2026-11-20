@@ -16,6 +16,7 @@ import {
   Tags,
   TrendingUp,
   Wallet,
+  Waypoints,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -30,6 +31,7 @@ const NAV = [
   { href: "/", label: "Overview", icon: BarChart3 },
   { href: "/explore", label: "Explore", icon: Compass },
   { href: "/requests", label: "Requests", icon: ListOrdered },
+  { href: "/traces", label: "Traces", icon: Waypoints },
   { href: "/budgets", label: "Budgets", icon: Wallet },
   { href: "/forecast", label: "Anomalies & Forecast", icon: TrendingUp },
   { href: "/reconciliation", label: "Reconciliation", icon: Scale },

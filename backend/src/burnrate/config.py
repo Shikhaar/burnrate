@@ -46,6 +46,21 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_org: str = ""
 
+    # LLM gateways / tracing tools your apps already log to (see `burnrate sync litellm|langfuse`).
+    # LiteLLM: proxy URL and a key that can read spend logs (a proxy_admin_viewer user's key is read-only).
+    litellm_url: str = ""
+    litellm_api_key: str = ""
+    # Langfuse: the project's API keys. The host defaults to Langfuse Cloud EU, like Langfuse's own SDKs; US is
+    # https://us.cloud.langfuse.com, and self-hosted is your own URL (Langfuse v4+).
+    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+
+    # Link from a trace in Burnrate to where its prompts live, for traces sent over OpenTelemetry or the
+    # SDK, e.g. "https://phoenix.internal/projects/default/traces/{trace_id}". Langfuse imports link
+    # to Langfuse on their own.
+    trace_url_template: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

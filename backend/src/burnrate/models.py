@@ -101,6 +101,7 @@ class UsageEvent(Base):
         Index("ix_usage_events_day_provider", "day", "provider"),
         Index("ix_usage_events_day_project", "day", "project"),
         Index("ix_usage_events_timestamp", "timestamp"),
+        Index("ix_usage_events_trace_id", "trace_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -144,6 +145,31 @@ class UsageEvent(Base):
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.cached_input_tokens + self.cache_write_tokens + self.output_tokens
+
+
+class TraceScore(Base):
+    """A quality score for a trace (one agent run or request chain): from Langfuse, or sent by an app.
+
+    Kept apart from usage events so a trace's cost can be read next to how good its answer was.
+    """
+
+    __tablename__ = "trace_scores"
+    __table_args__ = (
+        UniqueConstraint("external_id", name="uq_trace_scores_external_id"),
+        Index("ix_trace_scores_trace_id", "trace_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Idempotency key: "langfuse:<score id>", or the id an app sent. Re-sent scores are skipped.
+    external_id: Mapped[str | None] = mapped_column(String(160))
+    trace_id: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(100))
+    # NUMERIC and BOOLEAN (1/0) scores have a value; CATEGORICAL ones have a label.
+    data_type: Mapped[str] = mapped_column(String(20), default="NUMERIC")
+    value: Mapped[float | None] = mapped_column(Float)
+    label: Mapped[str | None] = mapped_column(String(100))
+    source: Mapped[str] = mapped_column(String(20), default="api")
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class PriceEntry(Base):

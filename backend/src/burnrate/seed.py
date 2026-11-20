@@ -3,6 +3,10 @@
 Includes realistic patterns the product should surface: weekday seasonality, steady growth, an
 agent retry loop (recent spike), heavy uncached prompts, a frontier model on trivial traffic, and a
 provider bill that drifts from the estimate.
+
+The support agent's and RAG search's calls are grouped into traces (one ticket, one question), with
+quality scores, so the Traces page has real runs to show: including the retry loop, which shows up as
+the same triage step repeated three or four times per ticket.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from types import SimpleNamespace
 from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.orm import Session
 
-from burnrate.models import BilledCost, Budget, EventCost, UsageEvent
+from burnrate.models import BilledCost, Budget, EventCost, TraceScore, UsageEvent
 from burnrate.pricing import PriceBook, compute_cost
 
 
@@ -97,10 +101,79 @@ def _multiplier(w: Workload, day: date, days_ago: int) -> float:
     return m
 
 
+# Each trace is one unit of work. Steps run in this order; `anchor` sets how many traces a day has (one
+# per anchor call), and the other steps' calls are dealt out across those traces in turn.
+TRACE_SHAPES = {
+    "support-agent": {"anchor": "reply-drafting", "order": ["ticket-triage", "sentiment-tagging", "reply-drafting"],
+                      "scores": {"resolved": "bool", "helpfulness": 0.82}},
+    "rag-search": {"anchor": "answer-synthesis", "order": ["query-embedding", "reranking", "answer-synthesis"],
+                   "scores": {"answer_relevance": 0.78}},
+}
+SCORED_SHARE = 0.6  # like real evals, only some traces get scored
+
+
+def _build_traces(events: list[dict], seed: int, now: datetime) -> list[dict]:
+    """Group the support agent's and RAG search's calls into traces, re-timing each trace's steps to run one
+    after another within the same day. Costs and daily totals don't change. Returns the trace scores."""
+    rng = random.Random(seed + 101)  # separate stream, so the rest of the dataset stays as it was
+    by_day: dict[tuple, dict[str, list[dict]]] = {}
+    for ev in events:
+        if ev["project"] in TRACE_SHAPES:
+            by_day.setdefault((ev["project"], ev["day"]), {}).setdefault(ev["feature"], []).append(ev)
+
+    scores = []
+    for (project, day), by_feature in sorted(by_day.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        shape = TRACE_SHAPES[project]
+        anchors = sorted(by_feature.get(shape["anchor"], []), key=lambda e: e["timestamp"])
+        if not anchors:
+            continue
+        traces = [{shape["anchor"]: [a]} for a in anchors]
+        for feature in shape["order"]:
+            if feature == shape["anchor"]:
+                continue
+            for i, ev in enumerate(by_feature.get(feature, [])):
+                traces[i % len(traces)].setdefault(feature, []).append(ev)
+
+        day_end = min(datetime.combine(day, time(23, 59, 59), UTC), now)
+        for t in traces:
+            steps = [ev for feature in shape["order"] for ev in t.get(feature, [])]
+            if len(steps) < 2:
+                continue  # a lone call isn't a run worth tracing
+            anchor = t[shape["anchor"]][0]
+            trace_id = uuid.UUID(int=rng.getrandbits(128)).hex
+            gaps = [rng.randint(40, 400) for _ in steps]
+            total_ms = sum((ev["latency_ms"] or 0) + g for ev, g in zip(steps, gaps, strict=True))
+            start = min(anchor["timestamp"], day_end - timedelta(milliseconds=total_ms))
+            start = max(start, datetime.combine(day, time(), UTC))
+            at = start
+            for ev, gap in zip(steps, gaps, strict=True):
+                ev["timestamp"] = ev["ingested_at"] = at
+                ev["trace_id"] = trace_id
+                ev["customer_id"] = anchor["customer_id"]
+                at += timedelta(milliseconds=(ev["latency_ms"] or 0) + gap)
+
+            if rng.random() > SCORED_SHARE:
+                continue
+            retries = len(t.get("ticket-triage", [])) - 1
+            failed = any(ev["status"] != "success" for ev in steps)
+            for name, kind in shape["scores"].items():
+                if kind == "bool":
+                    p_good = 0.82 - 0.12 * max(0, retries) - (0.4 if failed else 0)
+                    value = 1.0 if rng.random() < max(0.05, p_good) else 0.0
+                    data_type = "BOOLEAN"
+                else:
+                    value = round(min(1.0, max(0.0, rng.gauss(kind - (0.25 if failed else 0), 0.12))), 2)
+                    data_type = "NUMERIC"
+                scores.append({"external_id": f"demo:{trace_id}:{name}", "trace_id": trace_id, "name": name,
+                               "data_type": data_type, "value": value, "label": None, "source": "demo",
+                               "timestamp": at})
+    return scores
+
+
 def generate(session: Session, days: int = 90, seed: int = 7, reset: bool = True, scale: float = 4.0) -> dict:
     rng = random.Random(seed)
     if reset:
-        for model in (EventCost, UsageEvent, BilledCost, Budget):
+        for model in (EventCost, UsageEvent, BilledCost, Budget, TraceScore):
             session.execute(delete(model))
         session.commit()
 
@@ -166,6 +239,7 @@ def generate(session: Session, days: int = 90, seed: int = 7, reset: bool = True
                 billed[key] = billed.get(key, 0.0) + c.total_cost_usd
                 next_id += 1
 
+    scores = _build_traces(events, seed, now)
     for i in range(0, len(events), 5_000):
         session.execute(insert(UsageEvent), events[i : i + 5_000])
         session.execute(insert(EventCost), costs[i : i + 5_000])
@@ -179,6 +253,8 @@ def generate(session: Session, days: int = 90, seed: int = 7, reset: bool = True
          "amount_usd": round(v * BILLING_DRIFT.get(p, 1.0) * rng.uniform(0.995, 1.005), 2), "synced_at": now}
         for (p, d), v in billed.items() if d < end
     ])
+    for i in range(0, len(scores), 5_000):
+        session.execute(insert(TraceScore), scores[i : i + 5_000])
     if reset:
         session.add_all(
             Budget(name=n, scope_dimension=dim, scope_value=val, monthly_limit_usd=lim, alert_threshold=t)

@@ -242,6 +242,7 @@ def list_events(session: Session, limit: int, offset: int, filters: dict[str, st
                 "pricing": method,
                 "latency_ms": e.latency_ms,
                 "status": e.status,
+                "trace_id": e.trace_id,
             }
             for e, cost, method in rows
         ],

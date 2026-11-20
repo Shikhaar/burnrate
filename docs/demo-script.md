@@ -23,6 +23,7 @@ vendor sends a separate bill, and none of them can tell you which *feature* or *
 - "Burnrate caught that spike on its own: a retry loop in the support agent's ticket triage, +185% vs its baseline."
 - Point out *Same incident: model…, project…*. The project, feature and model spikes are grouped as one incident, so you get one alert instead of three.
 - Forecast: trend × weekday seasonality with a 90% band, shown against the company budget.
+- Open **Traces** (7 days): the support agent's costliest runs read `ticket-triage ×5 → sentiment-tagging → reply-drafting`. Open one: four repeated triage steps are most of its cost, and its `resolved` score is 0. "Cost per run went up and quality went down: that's the loop."
 
 **1:20 · Insights (25s)**
 - "It doesn't just report, it tells you what to fix, ranked by dollars." Two examples: cache the 13k-token RAG prompts, and move sentiment tagging off Opus.
